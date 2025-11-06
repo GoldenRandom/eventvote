@@ -311,7 +311,7 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
 
     // Get participant count
     const participantCount = await env.DB.prepare(
-      `SELECT COUNT(DISTINCT voter_id) as count FROM votes WHERE event_id = ?`
+      `SELECT COUNT(*) as count FROM participants WHERE event_id = ?`
     ).bind(eventId).first();
 
     return new Response(
