@@ -222,9 +222,10 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
         throw new Error(`Failed to encode image: ${error.message}. File may be corrupted.`);
       }
       
-      // Check if base64 string is too large (D1 has limits)
-      if (base64.length > 10 * 1024 * 1024) { // ~10MB base64 string
-        throw new Error('Encoded image is too large for storage. Try compressing the image.');
+      // Check if base64 string is too large (D1 has limits - max ~5MB base64 = ~3.75MB original)
+      // Be conservative to avoid SQLITE_TOOBIG errors
+      if (base64.length > 5 * 1024 * 1024) { // ~5MB base64 string (safe limit for D1)
+        throw new Error(`Image is too large after encoding (${(base64.length / 1024 / 1024).toFixed(2)}MB). Maximum safe size is ~3.75MB. The image will be automatically compressed on upload.`);
       }
       
       const dataUrl = `data:${file.type};base64,${base64}`;

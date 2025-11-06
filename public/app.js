@@ -367,6 +367,71 @@ async function createEvent(button) {
   }
 }
 
+// Compress image before upload
+function compressImage(file, maxWidth = 1920, maxHeight = 1920, quality = 0.85, maxSizeMB = 3) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Calculate new dimensions
+        if (width > maxWidth || height > maxHeight) {
+          if (width > height) {
+            height = (height * maxWidth) / width;
+            width = maxWidth;
+          } else {
+            width = (width * maxHeight) / height;
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        // Draw and compress
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Try different quality levels if still too large
+        let currentQuality = quality;
+        const tryCompress = () => {
+          canvas.toBlob((blob) => {
+            if (!blob) {
+              reject(new Error('Failed to compress image'));
+              return;
+            }
+
+            const sizeMB = blob.size / 1024 / 1024;
+            if (sizeMB > maxSizeMB && currentQuality > 0.3) {
+              // Reduce quality and try again
+              currentQuality -= 0.1;
+              canvas.toBlob((newBlob) => {
+                if (newBlob) {
+                  resolve(new File([newBlob], file.name, { type: 'image/jpeg' }));
+                } else {
+                  resolve(new File([blob], file.name, { type: 'image/jpeg' }));
+                }
+              }, 'image/jpeg', currentQuality);
+            } else {
+              resolve(new File([blob], file.name, { type: 'image/jpeg' }));
+            }
+          }, 'image/jpeg', currentQuality);
+        };
+
+        tryCompress();
+      };
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function uploadImageForEvent(eventId) {
   const input = document.createElement('input');
   input.type = 'file';
@@ -376,7 +441,7 @@ function uploadImageForEvent(eventId) {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
 
-    // Filter files by size (100MB limit)
+    // Filter files by size (100MB limit before compression)
     const validFiles = files.filter(file => {
       if (file.size > 100 * 1024 * 1024) {
         alert(`File "${file.name}" is too large (max 100MB). Skipping.`);
@@ -432,6 +497,31 @@ function uploadImageForEvent(eventId) {
       const progress = ((i + 1) / validFiles.length * 100).toFixed(0);
       
       document.getElementById('upload-progress').innerHTML = `
+        <div style="margin-bottom: 10px;">Processing ${i + 1} of ${validFiles.length}</div>
+        <div style="background: #f0f0f0; border-radius: 10px; overflow: hidden; height: 20px;">
+          <div style="background: #667eea; height: 100%; width: ${progress}%; transition: width 0.3s;"></div>
+        </div>
+        <div style="margin-top: 10px; font-size: 0.9rem; color: #666;">${file.name}</div>
+        <div style="margin-top: 5px; font-size: 0.85rem; color: #999;">Compressing image...</div>
+      `;
+
+      let fileToUpload = file;
+      
+      // Compress image if it's large (over 2MB)
+      if (file.size > 2 * 1024 * 1024) {
+        try {
+          fileToUpload = await compressImage(file, 1920, 1920, 0.85, 3);
+          const originalSize = (file.size / 1024 / 1024).toFixed(2);
+          const compressedSize = (fileToUpload.size / 1024 / 1024).toFixed(2);
+          console.log(`Compressed ${file.name}: ${originalSize}MB → ${compressedSize}MB`);
+        } catch (error) {
+          errors.push(`${file.name}: Compression failed - ${error.message}`);
+          errorCount++;
+          continue;
+        }
+      }
+
+      document.getElementById('upload-progress').innerHTML = `
         <div style="margin-bottom: 10px;">Uploading ${i + 1} of ${validFiles.length}</div>
         <div style="background: #f0f0f0; border-radius: 10px; overflow: hidden; height: 20px;">
           <div style="background: #667eea; height: 100%; width: ${progress}%; transition: width 0.3s;"></div>
@@ -440,7 +530,7 @@ function uploadImageForEvent(eventId) {
       `;
 
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('file', fileToUpload);
       formData.append('eventId', eventId);
 
       try {
