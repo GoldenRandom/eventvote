@@ -256,7 +256,10 @@ async function createEvent(button) {
     });
 
     if (!response.ok) {
-      throw new Error('Failed to create event');
+      const errorData = await response.json().catch(() => ({}));
+      const errorMessage = errorData.error || 'Failed to create event';
+      const errorDetails = errorData.details || errorData.hint || '';
+      throw new Error(errorMessage + (errorDetails ? '\n\n' + errorDetails : ''));
     }
 
     const event = await response.json();

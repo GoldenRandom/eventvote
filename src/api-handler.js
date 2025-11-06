@@ -5,23 +5,66 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
 
   // Create event
   if (path === '/api/events' && method === 'POST') {
-    const body = await request.json();
-    const eventId = crypto.randomUUID();
-    const qrCode = crypto.randomUUID();
-    const timestamp = Date.now();
-
-    await env.DB.prepare(
-      'INSERT INTO events (id, name, status, created_at, qr_code) VALUES (?, ?, ?, ?, ?)'
-    )
-      .bind(eventId, body.name, 'draft', timestamp, qrCode)
-      .run();
-
-    return new Response(
-      JSON.stringify({ id: eventId, qr_code: qrCode, name: body.name }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    try {
+      // Check if DB binding exists
+      if (!env.DB) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Database not configured. Please configure D1 binding in Cloudflare Pages settings.',
+            details: 'Go to Settings → Functions → D1 database bindings → Add: DB → voting-db'
+          }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
       }
-    );
+
+      const body = await request.json();
+      
+      if (!body.name || !body.name.trim()) {
+        return new Response(
+          JSON.stringify({ error: 'Event name is required' }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      const eventId = crypto.randomUUID();
+      const qrCode = crypto.randomUUID();
+      const timestamp = Date.now();
+
+      const result = await env.DB.prepare(
+        'INSERT INTO events (id, name, status, created_at, qr_code) VALUES (?, ?, ?, ?, ?)'
+      )
+        .bind(eventId, body.name.trim(), 'draft', timestamp, qrCode)
+        .run();
+
+      if (!result.success) {
+        throw new Error('Database insert failed');
+      }
+
+      return new Response(
+        JSON.stringify({ id: eventId, qr_code: qrCode, name: body.name }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    } catch (error) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'Failed to create event',
+          details: error.message,
+          hint: error.message.includes('DB') ? 'Database binding may not be configured. Check Cloudflare Pages settings.' : ''
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
   }
 
   // Get event by QR code

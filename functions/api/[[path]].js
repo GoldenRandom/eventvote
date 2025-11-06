@@ -26,10 +26,18 @@ export async function onRequest(context) {
   try {
     return await handleAPI(request, env, path, method, corsHeaders);
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    console.error('API Error:', error);
+    return new Response(
+      JSON.stringify({ 
+        error: error.message || 'Internal server error',
+        details: error.stack,
+        hint: 'Check Cloudflare Pages Functions logs for more details'
+      }), 
+      {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
+    );
   }
 }
 
