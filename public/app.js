@@ -30,6 +30,18 @@ function getVoterId() {
   return state.voterId;
 }
 
+function joinByCode() {
+  const codeInput = document.getElementById('join-code-input');
+  const code = codeInput?.value.trim();
+  
+  if (!code || code.length !== 5) {
+    alert('Please enter a valid 5-digit code');
+    return;
+  }
+  
+  joinEventByCode(code);
+}
+
 async function joinEventByCode(code) {
   try {
     const voterId = getVoterId();
@@ -48,9 +60,8 @@ async function joinEventByCode(code) {
     render();
     setupStarRating();
     
-    if (fullEvent.status === 'active') {
-      startPollingForCurrentImage();
-    }
+    // Always start polling - it will handle status changes
+    startPollingForCurrentImage();
   } catch (error) {
     alert('Error joining event: ' + error.message);
     render();
@@ -72,6 +83,14 @@ function startPollingForCurrentImage() {
       const response = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}?voter_id=${getVoterId()}`);
       const eventData = await response.json();
       
+      // Check if status changed from draft to active
+      if (state.currentEvent.status === 'draft' && eventData.status === 'active') {
+        state.currentEvent = eventData;
+        render();
+        setupStarRating();
+      }
+      
+      // Check if current image changed
       if (eventData.currentImageIndex !== state.currentImageIndex) {
         state.currentImageIndex = eventData.currentImageIndex;
         state.currentEvent = eventData;
@@ -79,11 +98,13 @@ function startPollingForCurrentImage() {
         setupStarRating();
       }
       
+      // Update participant count
       if (eventData.participantCount !== state.currentEvent.participantCount) {
         state.currentEvent = eventData;
         render();
       }
       
+      // Check if event ended
       if (eventData.status === 'closed') {
         clearInterval(pollingInterval);
         showLeaderboard();
@@ -166,8 +187,20 @@ function renderHome() {
       </div>
       <div class="card">
         <h2>Get Started</h2>
-        <div style="display: flex; gap: 20px; margin-top: 20px;">
+        <div style="display: flex; gap: 20px; margin-top: 20px; flex-wrap: wrap;">
           <button class="btn" data-action="admin">Admin Panel</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top: 20px;">
+        <h2>Join Event</h2>
+        <div style="margin-top: 20px;">
+          <div class="input-group">
+            <label for="join-code-input">Enter Join Code</label>
+            <input type="text" id="join-code-input" placeholder="Enter 5-digit code" maxlength="5" pattern="[0-9]{5}" style="text-align: center; font-size: 1.5rem; letter-spacing: 0.5rem; font-weight: 600;" onkeypress="if(event.key==='Enter') joinByCode()">
+          </div>
+          <button class="btn btn-success" onclick="joinByCode()" style="width: 100%; margin-top: 10px; font-size: 1.1rem; padding: 15px;">
+            Join Event
+          </button>
         </div>
       </div>
     </div>
@@ -440,6 +473,7 @@ async function advanceToNextImage(eventId) {
 }
 
 window.advanceToNextImage = advanceToNextImage;
+window.joinByCode = joinByCode;
 
 function renderVoting() {
   if (!state.currentEvent || state.images.length === 0) {
