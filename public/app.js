@@ -454,11 +454,19 @@ function uploadImageForEvent(eventId) {
         } else {
           const errorData = await response.json().catch(() => ({}));
           errorCount++;
-          errors.push(`${file.name}: ${errorData.error || 'Upload failed'}`);
+          const errorMsg = errorData.error || 'Upload failed';
+          const errorDetails = errorData.details ? ` - ${errorData.details}` : '';
+          errors.push(`${file.name}: ${errorMsg}${errorDetails}`);
         }
       } catch (error) {
         errorCount++;
-        errors.push(`${file.name}: ${error.message}`);
+        let errorMsg = error.message;
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+          errorMsg = 'Network error - check your connection';
+        } else if (error.message.includes('timeout')) {
+          errorMsg = 'Upload timeout - file may be too large';
+        }
+        errors.push(`${file.name}: ${errorMsg}`);
       }
     }
 

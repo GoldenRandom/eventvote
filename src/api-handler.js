@@ -200,29 +200,49 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
 
       // Convert file to base64 for storage
       // Use a more efficient method for large files
-      const arrayBuffer = await file.arrayBuffer();
+      let arrayBuffer;
+      try {
+        arrayBuffer = await file.arrayBuffer();
+      } catch (error) {
+        throw new Error(`Failed to read file: ${error.message}`);
+      }
+
       const bytes = new Uint8Array(arrayBuffer);
       
       // Convert to base64 in chunks to avoid memory issues
       let base64 = '';
       const chunkSize = 8192;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        const chunk = bytes.subarray(i, i + chunkSize);
-        base64 += String.fromCharCode.apply(null, chunk);
+      try {
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          const chunk = bytes.subarray(i, i + chunkSize);
+          base64 += String.fromCharCode.apply(null, chunk);
+        }
+        base64 = btoa(base64);
+      } catch (error) {
+        throw new Error(`Failed to encode image: ${error.message}. File may be corrupted.`);
       }
-      base64 = btoa(base64);
+      
+      // Check if base64 string is too large (D1 has limits)
+      if (base64.length > 10 * 1024 * 1024) { // ~10MB base64 string
+        throw new Error('Encoded image is too large for storage. Try compressing the image.');
+      }
       
       const dataUrl = `data:${file.type};base64,${base64}`;
 
       // Insert into database
-      const result = await env.DB.prepare(
-        'INSERT INTO images (id, event_id, url, filename, uploaded_at) VALUES (?, ?, ?, ?, ?)'
-      )
-        .bind(imageId, eventId, dataUrl, filename, timestamp)
-        .run();
+      let result;
+      try {
+        result = await env.DB.prepare(
+          'INSERT INTO images (id, event_id, url, filename, uploaded_at) VALUES (?, ?, ?, ?, ?)'
+        )
+          .bind(imageId, eventId, dataUrl, filename, timestamp)
+          .run();
+      } catch (error) {
+        throw new Error(`Database error: ${error.message}`);
+      }
 
       if (!result.success) {
-        throw new Error('Database insert failed');
+        throw new Error(`Database insert failed: ${result.error || 'Unknown error'}`);
       }
 
       return new Response(
@@ -238,10 +258,11 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
         }
       );
     } catch (error) {
+      console.error('Image upload error:', error);
       return new Response(
         JSON.stringify({ 
           error: 'Failed to upload image',
-          details: error.message
+          details: error.message || 'Unknown error occurred'
         }),
         {
           status: 500,
