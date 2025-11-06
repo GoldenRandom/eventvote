@@ -792,11 +792,6 @@ async function submitVote() {
     submitBtn.textContent = '✓ Voted!';
     submitBtn.style.background = '#28a745';
     
-    // Refresh stats
-    const fullEventResponse = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}`);
-    const fullEvent = await fullEventResponse.json();
-    state.currentEvent = fullEvent;
-    
     // Refresh event data to get updated participant count
     try {
       const fullEventResponse = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}`);
