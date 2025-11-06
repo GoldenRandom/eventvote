@@ -43,6 +43,13 @@ async function joinEventByQR(qrCode) {
     state.currentImageIndex = 0;
     state.currentView = 'voting';
     
+    // Show welcome message with participant count
+    if (fullEvent.participantCount > 0) {
+      setTimeout(() => {
+        alert(`Welcome! ${fullEvent.participantCount} participant${fullEvent.participantCount !== 1 ? 's' : ''} ${fullEvent.participantCount === 1 ? 'has' : 'have'} joined this event.`);
+      }, 500);
+    }
+    
     render();
     setupStarRating();
   } catch (error) {
@@ -109,6 +116,9 @@ function render() {
       break;
     case 'qr-scanner':
       root.innerHTML = renderQRScanner();
+      break;
+    case 'leaderboard':
+      root.innerHTML = renderLeaderboard();
       break;
     default:
       root.innerHTML = renderHome();
@@ -185,9 +195,13 @@ function renderVoting() {
   const voteStats = state.currentEvent.voteStats || [];
   const stats = voteStats.find(s => s.image_id === currentImage.id) || { avg_stars: 0, vote_count: 0 };
   const progress = ((state.currentImageIndex + 1) / state.images.length * 100).toFixed(0);
+  const participantCount = state.currentEvent.participantCount || 0;
   
   // Check if user has voted on this image
   const hasVoted = state.votedImages && state.votedImages.includes(currentImage.id);
+  
+  // Check if user has voted on all images
+  const allVoted = state.votedImages && state.votedImages.length === state.images.length;
 
   return `
     <div class="container">
@@ -205,7 +219,21 @@ function renderVoting() {
         <div style="background: #f0f0f0; border-radius: 10px; overflow: hidden; height: 8px;">
           <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); height: 100%; width: ${progress}%; transition: width 0.3s;"></div>
         </div>
+        <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.9rem; color: #666;">
+          <span>👥 ${participantCount} participant${participantCount !== 1 ? 's' : ''}</span>
+          <span>${state.votedImages ? state.votedImages.length : 0} / ${state.images.length} voted</span>
+        </div>
       </div>
+      
+      ${allVoted ? `
+      <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; margin-bottom: 20px; text-align: center; padding: 20px;">
+        <h2 style="margin: 0 0 10px 0;">🎉 You've voted on all images!</h2>
+        <p style="margin: 0;">View the leaderboard to see the results</p>
+        <button class="btn" onclick="showLeaderboard()" style="margin-top: 15px; background: white; color: #667eea; border: none;">
+          View Leaderboard
+        </button>
+      </div>
+      ` : ''}
 
       <div class="card voting-interface">
         <!-- Image Stats -->
@@ -577,14 +605,42 @@ function uploadImageForEvent(eventId) {
     }
     document.getElementById('upload-stats').innerHTML = statsHtml;
 
-    // Auto-close after 3 seconds if all successful
-    if (errorCount === 0) {
-      setTimeout(() => {
-        modal.remove();
-        if (successCount > 0) {
-          alert(`Successfully uploaded ${successCount} image(s)!`);
+    // Show results and start button
+    if (errorCount === 0 && successCount > 0) {
+      // Add Start Event button
+      const startBtn = document.createElement('button');
+      startBtn.className = 'btn btn-success';
+      startBtn.textContent = 'Start Event';
+      startBtn.style.marginTop = '20px';
+      startBtn.onclick = async () => {
+        try {
+          const response = await fetch(`${API_BASE}/api/events/${eventId}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'active' }),
+          });
+          if (response.ok) {
+            modal.remove();
+            alert('Event started! Participants can now join and vote.');
+            state.currentView = 'admin';
+            render();
+            loadEvents();
+          } else {
+            alert('Failed to start event');
+          }
+        } catch (error) {
+          alert('Error starting event: ' + error.message);
         }
-      }, 2000);
+      };
+      progressContainer.appendChild(startBtn);
+      
+      // Add close button
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'btn btn-secondary';
+      closeBtn.textContent = 'Close';
+      closeBtn.style.marginTop = '10px';
+      closeBtn.onclick = () => modal.remove();
+      progressContainer.appendChild(closeBtn);
     } else {
       // Add close button if there are errors
       const closeBtn = document.createElement('button');
@@ -741,13 +797,30 @@ async function submitVote() {
     const fullEvent = await fullEventResponse.json();
     state.currentEvent = fullEvent;
     
+    // Refresh event data to get updated participant count
+    try {
+      const fullEventResponse = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}`);
+      const fullEvent = await fullEventResponse.json();
+      state.currentEvent = fullEvent;
+    } catch (e) {
+      console.error('Failed to refresh event data:', e);
+    }
+    
     // Auto-advance after 1 second
     setTimeout(() => {
       if (state.currentImageIndex < state.images.length - 1) {
         nextImage();
       } else {
-        render();
-        setupStarRating();
+        // Check if all images are voted
+        const allVoted = state.votedImages && state.votedImages.length === state.images.length;
+        if (allVoted) {
+          // Show leaderboard option
+          render();
+          setupStarRating();
+        } else {
+          render();
+          setupStarRating();
+        }
       }
     }, 1000);
   } catch (error) {
@@ -913,9 +986,104 @@ async function joinEvent() {
 }
 
 // Make functions globally available
+async function showLeaderboard() {
+  if (!state.currentEvent) return;
+  
+  try {
+    const response = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}/leaderboard`);
+    if (!response.ok) {
+      throw new Error('Failed to load leaderboard');
+    }
+    
+    const data = await response.json();
+    const leaderboard = data.leaderboard || [];
+    const participantCount = data.participantCount || 0;
+    
+    state.currentView = 'leaderboard';
+    state.leaderboardData = { leaderboard, participantCount };
+    render();
+  } catch (error) {
+    alert('Error loading leaderboard: ' + error.message);
+  }
+}
+
+function renderLeaderboard() {
+  if (!state.leaderboardData) {
+    return '<div class="container"><div class="card"><div class="loading">Loading leaderboard...</div></div></div>';
+  }
+  
+  const { leaderboard, participantCount } = state.leaderboardData;
+  
+  return `
+    <div class="container">
+      <div class="header">
+        <h1>🏆 Leaderboard</h1>
+        <p style="color: white; margin-top: 10px;">${state.currentEvent.name}</p>
+      </div>
+      
+      <div class="card" style="margin-bottom: 20px; text-align: center; padding: 20px;">
+        <div style="display: flex; justify-content: space-around; flex-wrap: wrap;">
+          <div class="stat-item">
+            <div class="stat-value" style="font-size: 2rem;">👥 ${participantCount}</div>
+            <div class="stat-label">Total Participants</div>
+          </div>
+          <div class="stat-item">
+            <div class="stat-value" style="font-size: 2rem;">📸 ${leaderboard.length}</div>
+            <div class="stat-label">Images</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="card">
+        <h2 style="text-align: center; margin-bottom: 20px;">Top Rated Images</h2>
+        ${leaderboard.length === 0 ? `
+          <div style="text-align: center; padding: 40px; color: #666;">
+            <p>No votes yet. Be the first to vote!</p>
+            <button class="btn" onclick="state.currentView='voting'; render(); setupStarRating();">Start Voting</button>
+          </div>
+        ` : `
+          <div style="display: grid; gap: 20px;">
+            ${leaderboard.map((item, index) => {
+              const rank = index + 1;
+              const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`;
+              return `
+                <div style="display: flex; align-items: center; gap: 20px; padding: 20px; border: 2px solid ${rank <= 3 ? '#667eea' : '#e0e0e0'}; border-radius: 12px; background: ${rank <= 3 ? '#f8f9ff' : 'white'};">
+                  <div style="font-size: 2rem; font-weight: bold; min-width: 60px; text-align: center;">
+                    ${medal}
+                  </div>
+                  <img src="${item.url}" alt="${item.filename}" style="width: 150px; height: 150px; object-fit: cover; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                  <div style="flex: 1;">
+                    <h3 style="margin: 0 0 10px 0;">${item.filename}</h3>
+                    <div style="display: flex; gap: 20px; margin-top: 10px;">
+                      <div>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #667eea;">⭐ ${parseFloat(item.avg_stars).toFixed(1)}</div>
+                        <div style="font-size: 0.9rem; color: #666;">Average Rating</div>
+                      </div>
+                      <div>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #667eea;">👥 ${item.vote_count}</div>
+                        <div style="font-size: 0.9rem; color: #666;">Total Votes</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `}
+        
+        <div style="margin-top: 30px; text-align: center;">
+          <button class="btn" onclick="state.currentView='voting'; render(); setupStarRating();">Back to Voting</button>
+          <button class="btn btn-secondary" onclick="state.currentView='home'; render();">Home</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 window.previousImage = previousImage;
 window.nextImage = nextImage;
 window.submitVote = submitVote;
 window.joinEvent = joinEvent;
+window.showLeaderboard = showLeaderboard;
 
 

@@ -111,11 +111,50 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
        FROM votes WHERE event_id = ? GROUP BY image_id`
     ).bind(eventId).all();
 
+    // Get participant count (unique voters)
+    const participantCount = await env.DB.prepare(
+      `SELECT COUNT(DISTINCT voter_id) as count FROM votes WHERE event_id = ?`
+    ).bind(eventId).first();
+
     return new Response(
       JSON.stringify({
         ...event,
         images: images.results || [],
         voteStats: voteStats.results || [],
+        participantCount: participantCount?.count || 0,
+      }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  // Get leaderboard for event
+  if (path.startsWith('/api/events/') && path.endsWith('/leaderboard') && method === 'GET') {
+    const eventId = path.split('/api/events/')[1].replace('/leaderboard', '');
+
+    // Get all images with their stats, ordered by average rating
+    const leaderboard = await env.DB.prepare(
+      `SELECT 
+        i.id, i.url, i.filename, i.uploaded_at,
+        COALESCE(AVG(v.stars), 0) as avg_stars,
+        COUNT(v.id) as vote_count
+       FROM images i
+       LEFT JOIN votes v ON i.id = v.image_id
+       WHERE i.event_id = ?
+       GROUP BY i.id
+       ORDER BY avg_stars DESC, vote_count DESC`
+    ).bind(eventId).all();
+
+    // Get participant count
+    const participantCount = await env.DB.prepare(
+      `SELECT COUNT(DISTINCT voter_id) as count FROM votes WHERE event_id = ?`
+    ).bind(eventId).first();
+
+    return new Response(
+      JSON.stringify({
+        leaderboard: leaderboard.results || [],
+        participantCount: participantCount?.count || 0,
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
