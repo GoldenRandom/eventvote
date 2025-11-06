@@ -440,7 +440,14 @@ function renderVoting() {
       ` : ''}
 
       <div class="card voting-interface">
-        <!-- Image Stats -->
+        <!-- Instructions -->
+        <div style="text-align: center; margin-bottom: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+          <h2 style="margin: 0 0 10px 0; color: #333;">Rate the image shown on screen</h2>
+          <p style="color: #666; margin: 0;">Look at the image displayed on the main screen and rate it below</p>
+        </div>
+
+        <!-- Image Stats (hidden from participants, only show if voted) -->
+        ${hasVoted ? `
         <div class="stats" style="margin-bottom: 20px;">
           <div class="stat-item">
             <div class="stat-value" style="font-size: 1.5rem;">⭐ ${stats.avg_stars ? stats.avg_stars.toFixed(1) : '0.0'}</div>
@@ -450,24 +457,12 @@ function renderVoting() {
             <div class="stat-value" style="font-size: 1.5rem;">👥 ${stats.vote_count || 0}</div>
             <div class="stat-label">Total Votes</div>
           </div>
-          ${hasVoted ? `
           <div class="stat-item">
             <div class="stat-value" style="font-size: 1.5rem; color: #28a745;">✓</div>
             <div class="stat-label">You Voted</div>
           </div>
-          ` : ''}
         </div>
-
-        <!-- Image Display -->
-        <div style="position: relative; margin: 20px 0;">
-          <img src="${currentImage.url}" alt="${currentImage.filename}" class="voting-image" id="voting-image" 
-               style="max-width: 100%; max-height: 60vh; object-fit: contain; border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); background: #f8f9fa; padding: 10px;">
-          ${hasVoted ? `
-          <div style="position: absolute; top: 10px; right: 10px; background: #28a745; color: white; padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9rem;">
-            ✓ Voted
-          </div>
-          ` : ''}
-        </div>
+        ` : ''}
 
         <!-- Star Rating -->
         <div style="margin: 30px 0;">
@@ -997,15 +992,6 @@ async function submitVote() {
     submitBtn.style.background = '#28a745';
     
     // Refresh event data to get updated participant count
-    try {
-      const fullEventResponse = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}`);
-      const fullEvent = await fullEventResponse.json();
-      state.currentEvent = fullEvent;
-    } catch (e) {
-      console.error('Failed to refresh event data:', e);
-    }
-    
-    // Refresh event data
     try {
       const fullEventResponse = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}`);
       const fullEvent = await fullEventResponse.json();
