@@ -383,14 +383,12 @@ function startPresentationPolling(eventId) {
       state.presentationData = data;
       render();
       
-      // Auto-advance when all participants have voted
+      // Auto-advance instantly when all participants have voted
       if (data.allVoted && !lastAllVotedState && data.participantCount > 0) {
         lastAllVotedState = true;
-        // Small delay to show the "all voted" message, then auto-advance
-        setTimeout(async () => {
-          await advanceToNextImage(eventId);
-          lastAllVotedState = false; // Reset for next image
-        }, 2000); // 2 second delay to show confirmation
+        // Instant auto-advance
+        await advanceToNextImage(eventId);
+        lastAllVotedState = false; // Reset for next image
       } else if (!data.allVoted) {
         lastAllVotedState = false; // Reset if not all voted yet
       }
@@ -453,7 +451,7 @@ function renderPresentationView() {
       ${allVoted ? `
       <div class="card" style="background: #28a745; color: white; text-align: center; padding: 20px; margin-bottom: 20px;">
         <h2 style="margin: 0 0 10px 0;">✅ All participants have voted!</h2>
-        <p style="margin: 5px 0; font-size: 0.9rem; opacity: 0.9;">Advancing to ${isLastImage ? 'leaderboard' : 'next image'}...</p>
+        <p style="margin: 5px 0; font-size: 0.9rem; opacity: 0.9;">Auto-advancing to ${isLastImage ? 'leaderboard' : 'next image'}...</p>
       </div>
       ` : `
       <div class="card" style="background: #ffc107; color: #000; text-align: center; padding: 20px; margin-bottom: 20px;">
@@ -461,6 +459,13 @@ function renderPresentationView() {
         <p style="margin: 5px 0 0 0;">${votesOnCurrentImage} / ${participantCount} have voted</p>
       </div>
       `}
+      
+      <div class="card" style="text-align: center; margin-bottom: 20px;">
+        <button class="btn" onclick="advanceToNextImage('${event.id}')" style="font-size: 1.1rem; padding: 12px 24px; min-width: 200px;">
+          ${isLastImage ? 'Show Leaderboard' : 'Next Image →'}
+        </button>
+        <p style="margin-top: 10px; color: #666; font-size: 0.9rem;">Admin can advance manually at any time</p>
+      </div>
     </div>
   `;
 }
