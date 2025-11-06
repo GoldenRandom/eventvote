@@ -7,17 +7,16 @@ let state = {
   images: [],
   currentImageIndex: 0,
   voterId: localStorage.getItem('voterId') || null,
-  votedImages: JSON.parse(localStorage.getItem('votedImages') || '[]'), // Track which images user has voted on
+  votedImages: JSON.parse(localStorage.getItem('votedImages') || '[]'),
 };
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', () => {
-  // Check for QR code in URL
   const urlParams = new URLSearchParams(window.location.search);
-  const qrCode = urlParams.get('qr');
+  const code = urlParams.get('code');
   
-  if (qrCode) {
-    joinEventByQR(qrCode);
+  if (code) {
+    joinEventByCode(code);
   } else {
     render();
   }
@@ -25,24 +24,25 @@ document.addEventListener('DOMContentLoaded', () => {
   setupEventListeners();
 });
 
-async function joinEventByQR(qrCode) {
+// Generate or get voter ID
+function getVoterId() {
+  if (!state.voterId) {
+    state.voterId = `voter_${crypto.randomUUID()}`;
+    localStorage.setItem('voterId', state.voterId);
+  }
+  return state.voterId;
+}
+
+async function joinEventByCode(code) {
   try {
-    // Generate or get voter ID
-    if (!state.voterId) {
-      state.voterId = `voter_${crypto.randomUUID()}`;
-      localStorage.setItem('voterId', state.voterId);
-    }
-    
-    // Join event with voter_id
-    const response = await fetch(`${API_BASE}/api/events/qr/${qrCode}?voter_id=${state.voterId}`);
+    const voterId = getVoterId();
+    const response = await fetch(`${API_BASE}/api/events/qr/${code}?voter_id=${voterId}`);
     if (!response.ok) {
       throw new Error('Event not found');
     }
 
     const event = await response.json();
-    
-    // Get full event data with images (also register as participant)
-    const fullEventResponse = await fetch(`${API_BASE}/api/events/${event.id}?voter_id=${state.voterId}`);
+    const fullEventResponse = await fetch(`${API_BASE}/api/events/${event.id}?voter_id=${voterId}`);
     const fullEvent = await fullEventResponse.json();
     
     state.currentEvent = fullEvent;
@@ -50,21 +50,9 @@ async function joinEventByQR(qrCode) {
     state.currentImageIndex = fullEvent.currentImageIndex || 0;
     state.currentView = 'voting';
     
-    // Show welcome message
-    if (fullEvent.status === 'draft') {
-      setTimeout(() => {
-        alert(`Welcome! You are participant #${fullEvent.participantCount || 1}. The event will start soon.`);
-      }, 500);
-    } else if (fullEvent.status === 'active') {
-      setTimeout(() => {
-        alert(`Welcome! You are participant #${fullEvent.participantCount || 1}. Start voting!`);
-      }, 500);
-    }
-    
     render();
     setupStarRating();
     
-    // Start polling for current image updates
     if (fullEvent.status === 'active') {
       startPollingForCurrentImage();
     }
@@ -86,10 +74,9 @@ function startPollingForCurrentImage() {
     }
     
     try {
-      const response = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}?voter_id=${state.voterId || ''}`);
+      const response = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}?voter_id=${getVoterId()}`);
       const eventData = await response.json();
       
-      // Update current image if it changed
       if (eventData.currentImageIndex !== state.currentImageIndex) {
         state.currentImageIndex = eventData.currentImageIndex;
         state.currentEvent = eventData;
@@ -97,19 +84,11 @@ function startPollingForCurrentImage() {
         setupStarRating();
       }
       
-      // Always update participant count and other data in real-time
-      const oldParticipantCount = state.currentEvent?.participantCount || 0;
-      const oldVotesOnCurrent = state.currentEvent?.votesOnCurrentImage || 0;
-      
-      state.currentEvent = eventData;
-      
-      // Render if participant count or votes changed
-      if (eventData.participantCount !== oldParticipantCount || 
-          eventData.votesOnCurrentImage !== oldVotesOnCurrent) {
+      if (eventData.participantCount !== state.currentEvent.participantCount) {
+        state.currentEvent = eventData;
         render();
       }
       
-      // Check if event ended
       if (eventData.status === 'closed') {
         clearInterval(pollingInterval);
         showLeaderboard();
@@ -117,45 +96,34 @@ function startPollingForCurrentImage() {
     } catch (error) {
       console.error('Polling error:', error);
     }
-  }, 2000); // Poll every 2 seconds
+  }, 2000);
 }
 
 function setupEventListeners() {
-  // Navigation
   document.addEventListener('click', (e) => {
     if (e.target.matches('[data-action]')) {
       const action = e.target.getAttribute('data-action');
-      handleAction(action, e.target);
+      handleAction(action);
     }
   });
 }
 
-function handleAction(action, element) {
+function handleAction(action) {
   switch (action) {
-    case 'create-event':
-      showCreateEvent();
-      break;
     case 'admin':
-      showAdmin();
+      state.currentView = 'admin';
+      render();
       break;
-    case 'scan-qr':
-      showQRScanner();
-      break;
-    case 'submit-event':
-      createEvent(element);
-      break;
-    case 'upload-image':
-      triggerFileUpload();
-      break;
-    case 'start-event':
-      startEvent(element);
-      break;
-    case 'view-qr':
-      showQRCode(element);
+    case 'create-event':
+      state.currentView = 'create-event';
+      render();
       break;
     case 'back':
       state.currentView = 'home';
       render();
+      break;
+    case 'submit-event':
+      createEvent();
       break;
   }
 }
@@ -173,17 +141,17 @@ function render() {
     case 'create-event':
       root.innerHTML = renderCreateEvent();
       break;
-    case 'voting':
-      root.innerHTML = renderVoting();
-      break;
-    case 'qr-scanner':
-      root.innerHTML = renderQRScanner();
-      break;
-    case 'leaderboard':
-      root.innerHTML = renderLeaderboard();
+    case 'show-code':
+      root.innerHTML = renderShowCode();
       break;
     case 'presentation':
       root.innerHTML = renderPresentationView();
+      break;
+    case 'voting':
+      root.innerHTML = renderVoting();
+      break;
+    case 'leaderboard':
+      root.innerHTML = renderLeaderboard();
       break;
     default:
       root.innerHTML = renderHome();
@@ -195,14 +163,26 @@ function renderHome() {
     <div class="container">
       <div class="header">
         <h1>⭐ Star Voting System</h1>
-        <p>Create events, upload images, and let people vote with stars!</p>
       </div>
       <div class="card">
         <h2>Get Started</h2>
         <div style="display: flex; gap: 20px; margin-top: 20px; flex-wrap: wrap;">
           <button class="btn" data-action="admin">Admin Panel</button>
-          <button class="btn btn-secondary" data-action="scan-qr">Scan QR Code to Vote</button>
         </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdmin() {
+  return `
+    <div class="container">
+      <div class="header">
+        <h1>Admin Panel</h1>
+      </div>
+      <div class="card">
+        <button class="btn" data-action="create-event">Create New Event</button>
+        <button class="btn btn-secondary" data-action="back">Back to Home</button>
       </div>
     </div>
   `;
@@ -228,21 +208,116 @@ function renderCreateEvent() {
   `;
 }
 
-function renderAdmin() {
+async function createEvent() {
+  const nameInput = document.getElementById('event-name');
+  const name = nameInput?.value.trim();
+  
+  if (!name) {
+    alert('Please enter an event name');
+    return;
+  }
+  
+  try {
+    const response = await fetch(`${API_BASE}/api/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create event');
+    }
+    
+    const event = await response.json();
+    state.currentEvent = event;
+    state.currentView = 'show-code';
+    render();
+    uploadImagesForEvent(event.id);
+  } catch (error) {
+    alert('Error creating event: ' + error.message);
+  }
+}
+
+function renderShowCode() {
+  if (!state.currentEvent) return '<div class="container"><div class="card">Loading...</div></div>';
+  
   return `
     <div class="container">
       <div class="header">
-        <h1>Admin Panel</h1>
+        <h1>${state.currentEvent.name}</h1>
       </div>
-      <div class="card">
-        <div style="display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;">
-          <button class="btn" data-action="create-event">Create New Event</button>
-          <button class="btn btn-secondary" data-action="back">Back to Home</button>
+      <div class="card" style="text-align: center;">
+        <h2 style="margin-bottom: 20px;">Join Code</h2>
+        <div class="code-display" id="join-code">${state.currentEvent.qr_code}</div>
+        <p style="margin-top: 20px; color: #666;">Share this code with participants</p>
+        <p style="margin: 10px 0; color: #666; font-size: 0.9rem;">Participants join at: <code>${window.location.origin}?code=${state.currentEvent.qr_code}</code></p>
+        
+        <div style="margin-top: 40px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+          <div style="font-size: 1.5rem; font-weight: 600; color: #667eea;" id="participant-count">0</div>
+          <div style="color: #666; margin-top: 10px;">Participants Joined</div>
         </div>
-        <div id="events-list" style="margin-top: 30px;"></div>
+        
+        <div style="margin-top: 30px;">
+          <button class="btn btn-success" id="start-vote-btn" onclick="startVoting()" style="font-size: 1.2rem; padding: 15px 30px;">
+            Start Voting
+          </button>
+        </div>
+        
+        <div style="margin-top: 20px;">
+          <button class="btn btn-secondary" onclick="state.currentView='admin'; render();">Back to Admin</button>
+        </div>
       </div>
     </div>
   `;
+}
+
+let participantPolling = null;
+
+function startParticipantPolling() {
+  if (participantPolling) clearInterval(participantPolling);
+  
+  participantPolling = setInterval(async () => {
+    if (state.currentView !== 'show-code' || !state.currentEvent) {
+      clearInterval(participantPolling);
+      return;
+    }
+    
+    try {
+      const response = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}`);
+      const eventData = await response.json();
+      const countEl = document.getElementById('participant-count');
+      if (countEl) {
+        countEl.textContent = eventData.participantCount || 0;
+      }
+    } catch (error) {
+      console.error('Polling error:', error);
+    }
+  }, 1000);
+}
+
+async function startVoting() {
+  if (!state.currentEvent) return;
+  
+  try {
+    const response = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'active' }),
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to start voting');
+    }
+    
+    if (confirm('Voting started! Open Presentation Mode to show images on screen?')) {
+      renderPresentation(state.currentEvent.id);
+    } else {
+      renderPresentation(state.currentEvent.id);
+    }
+  } catch (error) {
+    alert('Error starting vote: ' + error.message);
+  }
 }
 
 function renderPresentation(eventId) {
@@ -258,19 +333,10 @@ function startPresentationPolling(eventId) {
   state.presentationInterval = setInterval(async () => {
     try {
       const response = await fetch(`${API_BASE}/api/events/${eventId}/presentation`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch presentation data');
-      }
+      if (!response.ok) return;
+      
       const data = await response.json();
-      
-      // Always update to get real-time participant count
-      const oldCount = state.presentationData?.participantCount || 0;
-      const oldVotes = state.presentationData?.votesOnCurrentImage || 0;
-      const oldImageIndex = state.presentationData?.currentImageIndex || 0;
-      
       state.presentationData = data;
-      
-      // Always render for real-time updates (participant count, votes, image changes)
       render();
       
       if (data.event.status === 'closed') {
@@ -279,7 +345,7 @@ function startPresentationPolling(eventId) {
     } catch (error) {
       console.error('Presentation polling error:', error);
     }
-  }, 1000); // Poll every second for admin view
+  }, 1000);
 }
 
 function renderPresentationView() {
@@ -294,7 +360,6 @@ function renderPresentationView() {
       <div class="container">
         <div class="card" style="text-align: center; padding: 40px;">
           <h2>No images uploaded yet</h2>
-          <p>Upload images to start the presentation</p>
         </div>
       </div>
     `;
@@ -306,8 +371,7 @@ function renderPresentationView() {
   return `
     <div class="container">
       <div class="header">
-        <h1>${event.name} - Presentation Mode</h1>
-        <span class="status-badge status-${event.status}">${event.status}</span>
+        <h1>${event.name}</h1>
       </div>
       
       <div class="card" style="margin-bottom: 20px; padding: 15px;">
@@ -342,10 +406,6 @@ function renderPresentationView() {
         <p style="margin: 5px 0 0 0;">${votesOnCurrentImage} / ${participantCount} have voted</p>
       </div>
       `}
-      
-      <div class="card" style="text-align: center;">
-        <button class="btn btn-secondary" onclick="state.currentView='admin'; render(); loadEvents();">Back to Admin</button>
-      </div>
     </div>
   `;
 }
@@ -359,11 +419,8 @@ async function advanceToNextImage(eventId) {
     const data = await response.json();
     
     if (data.isComplete) {
-      // Show leaderboard
-      state.currentView = 'leaderboard';
       showLeaderboard();
     } else {
-      // Refresh presentation
       const presResponse = await fetch(`${API_BASE}/api/events/${eventId}/presentation`);
       state.presentationData = await presResponse.json();
       render();
@@ -373,46 +430,7 @@ async function advanceToNextImage(eventId) {
   }
 }
 
-async function startEventFromModal(eventId, modal) {
-  try {
-    console.log('Starting event:', eventId);
-    
-    const response = await fetch(`${API_BASE}/api/events/${eventId}/status`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json'},
-      body: JSON.stringify({ status: 'active' }),
-    });
-    
-    console.log('Response status:', response.status);
-    
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error('Error response:', errorData);
-      throw new Error(errorData.error || errorData.details || `Failed to start event (${response.status})`);
-    }
-    
-    const result = await response.json();
-    console.log('Success:', result);
-    
-    if (modal) modal.remove();
-    alert('Event started! Participants can now join. Open Presentation Mode to show images on screen.');
-    
-    // Ask if they want to open presentation mode
-    if (confirm('Would you like to open Presentation Mode now?')) {
-      renderPresentation(eventId);
-    } else {
-      state.currentView = 'admin';
-      render();
-      loadEvents();
-    }
-  } catch (error) {
-    console.error('Start event error:', error);
-    alert('Error starting event: ' + error.message + '\n\nCheck console for details.');
-  }
-}
-
 window.advanceToNextImage = advanceToNextImage;
-window.startEventFromModal = startEventFromModal;
 
 function renderVoting() {
   if (!state.currentEvent || state.images.length === 0) {
@@ -425,7 +443,6 @@ function renderVoting() {
     `;
   }
 
-  // Show waiting screen if event not started
   if (state.currentEvent.status === 'draft') {
     return `
       <div class="container">
@@ -438,7 +455,6 @@ function renderVoting() {
     `;
   }
 
-  // Show completed screen if event closed
   if (state.currentEvent.status === 'closed') {
     return `
       <div class="container">
@@ -462,42 +478,25 @@ function renderVoting() {
     `;
   }
 
-  const voteStats = state.currentEvent.voteStats || [];
-  const stats = voteStats.find(s => s.image_id === currentImage.id) || { avg_stars: 0, vote_count: 0 };
-  const progress = ((state.currentImageIndex + 1) / state.images.length * 100).toFixed(0);
   const participantCount = state.currentEvent.participantCount || 0;
   const votesOnCurrent = state.currentEvent.votesOnCurrentImage || 0;
-  
-  // Check if user has voted on this image
   const hasVoted = state.votedImages && state.votedImages.includes(currentImage.id);
 
   return `
     <div class="container">
       <div class="header">
         <h1>${state.currentEvent.name}</h1>
-        <span class="status-badge status-${state.currentEvent.status}">${state.currentEvent.status}</span>
       </div>
       
-      <!-- Progress Bar -->
       <div class="card" style="margin-bottom: 20px; padding: 15px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-          <span style="font-weight: 600;">Progress</span>
-          <span style="color: #667eea; font-weight: 600;">${state.currentImageIndex + 1} / ${state.images.length}</span>
-        </div>
-        <div style="background: #f0f0f0; border-radius: 10px; overflow: hidden; height: 8px;">
-          <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); height: 100%; width: ${progress}%; transition: width 0.3s;"></div>
+          <span style="font-weight: 600;">Image ${state.currentImageIndex + 1} of ${state.images.length}</span>
         </div>
         <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.9rem; color: #666;">
           <span>👥 ${participantCount} participant${participantCount !== 1 ? 's' : ''}</span>
           <span>${votesOnCurrent} / ${participantCount} voted on this image</span>
         </div>
       </div>
-      
-      ${state.currentEvent.allVotedOnCurrent && !hasVoted ? `
-      <div class="card" style="background: #ffc107; color: #000; margin-bottom: 20px; text-align: center; padding: 15px;">
-        <p style="margin: 0; font-weight: 600;">⏳ All participants have voted. Waiting for next image...</p>
-      </div>
-      ` : ''}
       
       ${hasVoted ? `
       <div class="card" style="background: #28a745; color: white; margin-bottom: 20px; text-align: center; padding: 15px;">
@@ -507,31 +506,11 @@ function renderVoting() {
       ` : ''}
 
       <div class="card voting-interface">
-        <!-- Instructions -->
         <div style="text-align: center; margin-bottom: 30px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
           <h2 style="margin: 0 0 10px 0; color: #333;">Rate the image shown on screen</h2>
           <p style="color: #666; margin: 0;">Look at the image displayed on the main screen and rate it below</p>
         </div>
 
-        <!-- Image Stats (hidden from participants, only show if voted) -->
-        ${hasVoted ? `
-        <div class="stats" style="margin-bottom: 20px;">
-          <div class="stat-item">
-            <div class="stat-value" style="font-size: 1.5rem;">⭐ ${stats.avg_stars ? stats.avg_stars.toFixed(1) : '0.0'}</div>
-            <div class="stat-label">Average Rating</div>
-          </div>
-          <div class="stat-item">
-            <div class="stat-value" style="font-size: 1.5rem;">👥 ${stats.vote_count || 0}</div>
-            <div class="stat-label">Total Votes</div>
-          </div>
-          <div class="stat-item">
-            <div class="stat-value" style="font-size: 1.5rem; color: #28a745;">✓</div>
-            <div class="stat-label">You Voted</div>
-          </div>
-        </div>
-        ` : ''}
-
-        <!-- Star Rating -->
         <div style="margin: 30px 0;">
           <div style="text-align: center; margin-bottom: 15px; font-weight: 600; color: #333;">Rate this image:</div>
           <div class="star-rating" id="star-rating">
@@ -540,7 +519,6 @@ function renderVoting() {
           <div id="star-feedback" style="text-align: center; margin-top: 10px; min-height: 20px; color: #667eea; font-weight: 600;"></div>
         </div>
 
-        <!-- Voting Button -->
         <div style="display: flex; gap: 10px; justify-content: center; margin-top: 30px; flex-wrap: wrap;">
           ${!hasVoted ? `
           <button class="btn btn-success" onclick="submitVote()" style="min-width: 200px; font-size: 1.2rem; padding: 15px 30px;">
@@ -558,94 +536,230 @@ function renderVoting() {
   `;
 }
 
-function renderQRScanner() {
+function setupStarRating() {
+  const stars = document.querySelectorAll('.star');
+  let selectedStars = 0;
+  
+  stars.forEach(star => {
+    star.addEventListener('click', () => {
+      selectedStars = parseInt(star.getAttribute('data-stars'));
+      updateStarDisplay(selectedStars);
+    });
+    
+    star.addEventListener('mouseenter', () => {
+      const hoverStars = parseInt(star.getAttribute('data-stars'));
+      highlightStars(hoverStars);
+    });
+  });
+  
+  document.querySelector('.star-rating')?.addEventListener('mouseleave', () => {
+    highlightStars(selectedStars);
+  });
+  
+  function highlightStars(count) {
+    stars.forEach((star, index) => {
+      if (index < count) {
+        star.classList.add('active');
+      } else {
+        star.classList.remove('active');
+      }
+    });
+  }
+  
+  function updateStarDisplay(count) {
+    selectedStars = count;
+    highlightStars(count);
+    const feedback = document.getElementById('star-feedback');
+    if (feedback) {
+      feedback.textContent = `${count} star${count > 1 ? 's' : ''} selected`;
+    }
+  }
+  
+  window.submitVote = async function() {
+    if (selectedStars === 0) {
+      alert('Please select a rating');
+      return;
+    }
+    
+    const currentImage = state.currentEvent.currentImage || state.images[state.currentImageIndex];
+    if (!currentImage) return;
+    
+    const submitBtn = document.querySelector('.btn-success');
+    const originalText = submitBtn?.textContent;
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting...';
+    }
+    
+    try {
+      const response = await fetch(`${API_BASE}/api/votes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          eventId: state.currentEvent.id,
+          imageId: currentImage.id,
+          voterId: getVoterId(),
+          stars: selectedStars,
+        }),
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to submit vote');
+      }
+      
+      if (!state.votedImages) state.votedImages = [];
+      if (!state.votedImages.includes(currentImage.id)) {
+        state.votedImages.push(currentImage.id);
+        localStorage.setItem('votedImages', JSON.stringify(state.votedImages));
+      }
+      
+      if (submitBtn) {
+        submitBtn.textContent = '✓ Voted!';
+        submitBtn.style.background = '#28a745';
+      }
+      
+      const fullEventResponse = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}?voter_id=${getVoterId()}`);
+      const fullEvent = await fullEventResponse.json();
+      state.currentEvent = fullEvent;
+      render();
+      setupStarRating();
+    } catch (error) {
+      alert('Error submitting vote: ' + error.message);
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = originalText;
+      }
+    }
+  };
+}
+
+async function showLeaderboard() {
+  if (!state.currentEvent) return;
+  
+  try {
+    const response = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}/leaderboard`);
+    const data = await response.json();
+    
+    state.leaderboardData = data;
+    state.currentView = 'leaderboard';
+    render();
+  } catch (error) {
+    alert('Error loading leaderboard: ' + error.message);
+  }
+}
+
+function renderLeaderboard() {
+  if (!state.leaderboardData) {
+    return '<div class="container"><div class="card"><div class="loading">Loading leaderboard...</div></div></div>';
+  }
+  
+  const { leaderboard, participantCount } = state.leaderboardData;
+  
   return `
     <div class="container">
       <div class="header">
-        <h1>Scan QR Code</h1>
+        <h1>🏆 Leaderboard</h1>
+        <p style="color: rgba(255,255,255,0.9);">${participantCount} participant${participantCount !== 1 ? 's' : ''} voted</p>
       </div>
-      <div class="card scanner-container">
-        <video id="scanner-video" autoplay playsinline></video>
-        <canvas id="scanner-canvas" class="hidden"></canvas>
-        <p>Point your camera at the QR code to join the event</p>
-        <button class="btn btn-secondary" data-action="back" style="margin-top: 20px;">Cancel</button>
+      
+      <div class="card">
+        <div style="display: grid; gap: 20px;">
+          ${leaderboard.map((item, index) => {
+            const rank = index + 1;
+            const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`;
+            return `
+              <div style="display: flex; gap: 20px; align-items: center; padding: 20px; background: ${rank <= 3 ? '#f8f9fa' : 'white'}; border-radius: 8px; border: ${rank <= 3 ? '2px solid #667eea' : '1px solid #e0e0e0'};">
+                <div style="font-size: 2rem; font-weight: 600; min-width: 60px; text-align: center;">${medal}</div>
+                <img src="${item.url}" alt="${item.filename}" style="width: 120px; height: 120px; object-fit: cover; border-radius: 8px;">
+                <div style="flex: 1;">
+                  <div style="font-size: 1.2rem; font-weight: 600; margin-bottom: 10px;">${item.filename}</div>
+                  <div style="display: flex; gap: 20px; color: #666;">
+                    <div>⭐ ${parseFloat(item.avg_stars).toFixed(1)}</div>
+                    <div>👥 ${item.vote_count} votes</div>
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
       </div>
     </div>
   `;
 }
 
-// API Functions
-async function createEvent(button) {
-  const form = button.closest('form');
-  const name = form.querySelector('#event-name').value;
-  
-  if (!name) {
-    alert('Please enter an event name');
-    return;
-  }
+function uploadImagesForEvent(eventId) {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.multiple = true;
+  input.onchange = async (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
 
-  button.disabled = true;
-  button.textContent = 'Creating...';
-
-  try {
-    const response = await fetch(`${API_BASE}/api/events`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
+    const validFiles = files.filter(file => {
+      if (file.size > 100 * 1024 * 1024) {
+        alert(`File "${file.name}" is too large (max 100MB). Skipping.`);
+        return false;
+      }
+      if (!file.type.startsWith('image/')) {
+        alert(`File "${file.name}" is not an image. Skipping.`);
+        return false;
+      }
+      return true;
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      const errorMessage = errorData.error || 'Failed to create event';
-      const errorDetails = errorData.details || errorData.hint || '';
-      throw new Error(errorMessage + (errorDetails ? '\n\n' + errorDetails : ''));
+    if (validFiles.length === 0) {
+      alert('No valid images to upload.');
+      return;
     }
 
-    const event = await response.json();
-    
-    // Create join URL for QR code
-    const joinUrl = `${window.location.origin}?qr=${event.qr_code}`;
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(joinUrl)}`;
-    const modal = document.createElement('div');
-    modal.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0,0,0,0.8);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    `;
-    
-    modal.innerHTML = `
-      <div class="card" style="max-width: 500px; text-align: center;">
-        <h2>Event Created Successfully!</h2>
-        <h3>${event.name}</h3>
-        <img src="${qrUrl}" alt="QR Code" style="margin: 20px 0; border: 4px solid #667eea; border-radius: 8px; padding: 10px; background: white;">
-        <p><strong>QR Code:</strong> <code style="background: #f0f0f0; padding: 5px 10px; border-radius: 4px;">${event.qr_code}</code></p>
-        <p style="margin: 10px 0; color: #666;">Share this QR code with participants</p>
-        <p style="margin: 10px 0; color: #666; font-size: 0.9rem;"><strong>Event ID:</strong> ${event.id}</p>
-        <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-          <button class="btn" onclick="uploadImageForEvent('${event.id}')">Upload Images</button>
-          <button class="btn btn-success" onclick="startEventFromModal('${event.id}', this.closest('div[style*=\"position: fixed\"]'))">Start Event</button>
-          <button class="btn btn-secondary" onclick="this.closest('div[style*=\"position: fixed\"]').remove(); state.currentView='admin'; render(); loadEvents();">Done</button>
-        </div>
-      </div>
-    `;
-    
-    document.body.appendChild(modal);
-  } catch (error) {
-    alert('Error creating event: ' + error.message);
-  } finally {
-    button.disabled = false;
-    button.textContent = 'Create Event';
-  }
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const file of validFiles) {
+      let fileToUpload = file;
+      
+      if (file.size > 2 * 1024 * 1024) {
+        try {
+          fileToUpload = await compressImage(file, 1920, 1920, 0.85, 3);
+        } catch (error) {
+          errorCount++;
+          continue;
+        }
+      }
+
+      const formData = new FormData();
+      formData.append('file', fileToUpload);
+      formData.append('eventId', eventId);
+
+      try {
+        const response = await fetch(`${API_BASE}/api/images`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (response.ok) {
+          successCount++;
+        } else {
+          errorCount++;
+        }
+      } catch (error) {
+        errorCount++;
+      }
+    }
+
+    if (successCount > 0) {
+      alert(`${successCount} image${successCount !== 1 ? 's' : ''} uploaded successfully!`);
+      startParticipantPolling();
+    }
+    if (errorCount > 0) {
+      alert(`${errorCount} image${errorCount !== 1 ? 's' : ''} failed to upload.`);
+    }
+  };
+  input.click();
 }
 
-// Compress image before upload
 function compressImage(file, maxWidth = 1920, maxHeight = 1920, quality = 0.85, maxSizeMB = 3) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -656,7 +770,6 @@ function compressImage(file, maxWidth = 1920, maxHeight = 1920, quality = 0.85, 
         let width = img.width;
         let height = img.height;
 
-        // Calculate new dimensions
         if (width > maxWidth || height > maxHeight) {
           if (width > height) {
             height = (height * maxWidth) / width;
@@ -670,11 +783,9 @@ function compressImage(file, maxWidth = 1920, maxHeight = 1920, quality = 0.85, 
         canvas.width = width;
         canvas.height = height;
 
-        // Draw and compress
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
 
-        // Try different quality levels if still too large
         let currentQuality = quality;
         const tryCompress = () => {
           canvas.toBlob((blob) => {
@@ -685,7 +796,6 @@ function compressImage(file, maxWidth = 1920, maxHeight = 1920, quality = 0.85, 
 
             const sizeMB = blob.size / 1024 / 1024;
             if (sizeMB > maxSizeMB && currentQuality > 0.3) {
-              // Reduce quality and try again
               currentQuality -= 0.1;
               canvas.toBlob((newBlob) => {
                 if (newBlob) {
@@ -709,630 +819,3 @@ function compressImage(file, maxWidth = 1920, maxHeight = 1920, quality = 0.85, 
     reader.readAsDataURL(file);
   });
 }
-
-function uploadImageForEvent(eventId) {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/*';
-  input.multiple = true;
-  input.onchange = async (e) => {
-    const files = Array.from(e.target.files);
-    if (files.length === 0) return;
-
-    // Filter files by size (100MB limit before compression)
-    const validFiles = files.filter(file => {
-      if (file.size > 100 * 1024 * 1024) {
-        alert(`File "${file.name}" is too large (max 100MB). Skipping.`);
-        return false;
-      }
-      if (!file.type.startsWith('image/')) {
-        alert(`File "${file.name}" is not an image. Skipping.`);
-        return false;
-      }
-      return true;
-    });
-
-    if (validFiles.length === 0) {
-      alert('No valid images to upload.');
-      return;
-    }
-
-    // Create upload progress modal
-    const modal = document.createElement('div');
-    modal.style.cssText = `
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0,0,0,0.8);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    `;
-    
-    const progressContainer = document.createElement('div');
-    progressContainer.className = 'card';
-    progressContainer.style.cssText = 'min-width: 400px; text-align: center;';
-    progressContainer.innerHTML = `
-      <h2>Uploading Images</h2>
-      <div id="upload-progress" style="margin: 20px 0;">
-        <div class="loading">Preparing upload...</div>
-      </div>
-      <div id="upload-stats" style="margin-top: 20px; color: #666;"></div>
-    `;
-    modal.appendChild(progressContainer);
-    document.body.appendChild(modal);
-
-    let successCount = 0;
-    let errorCount = 0;
-    const errors = [];
-
-    // Upload files one by one with progress
-    for (let i = 0; i < validFiles.length; i++) {
-      const file = validFiles[i];
-      const progress = ((i + 1) / validFiles.length * 100).toFixed(0);
-      
-      document.getElementById('upload-progress').innerHTML = `
-        <div style="margin-bottom: 10px;">Processing ${i + 1} of ${validFiles.length}</div>
-        <div style="background: #f0f0f0; border-radius: 10px; overflow: hidden; height: 20px;">
-          <div style="background: #667eea; height: 100%; width: ${progress}%; transition: width 0.3s;"></div>
-        </div>
-        <div style="margin-top: 10px; font-size: 0.9rem; color: #666;">${file.name}</div>
-        <div style="margin-top: 5px; font-size: 0.85rem; color: #999;">Compressing image...</div>
-      `;
-
-      let fileToUpload = file;
-      
-      // Compress image if it's large (over 2MB)
-      if (file.size > 2 * 1024 * 1024) {
-        try {
-          fileToUpload = await compressImage(file, 1920, 1920, 0.85, 3);
-          const originalSize = (file.size / 1024 / 1024).toFixed(2);
-          const compressedSize = (fileToUpload.size / 1024 / 1024).toFixed(2);
-          console.log(`Compressed ${file.name}: ${originalSize}MB → ${compressedSize}MB`);
-        } catch (error) {
-          errors.push(`${file.name}: Compression failed - ${error.message}`);
-          errorCount++;
-          continue;
-        }
-      }
-
-      document.getElementById('upload-progress').innerHTML = `
-        <div style="margin-bottom: 10px;">Uploading ${i + 1} of ${validFiles.length}</div>
-        <div style="background: #f0f0f0; border-radius: 10px; overflow: hidden; height: 20px;">
-          <div style="background: #667eea; height: 100%; width: ${progress}%; transition: width 0.3s;"></div>
-        </div>
-        <div style="margin-top: 10px; font-size: 0.9rem; color: #666;">${file.name}</div>
-      `;
-
-      const formData = new FormData();
-      formData.append('file', fileToUpload);
-      formData.append('eventId', eventId);
-
-      try {
-        const response = await fetch(`${API_BASE}/api/images`, {
-          method: 'POST',
-          body: formData,
-        });
-
-        if (response.ok) {
-          successCount++;
-        } else {
-          const errorData = await response.json().catch(() => ({}));
-          errorCount++;
-          const errorMsg = errorData.error || 'Upload failed';
-          const errorDetails = errorData.details ? ` - ${errorData.details}` : '';
-          errors.push(`${file.name}: ${errorMsg}${errorDetails}`);
-        }
-      } catch (error) {
-        errorCount++;
-        let errorMsg = error.message;
-        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-          errorMsg = 'Network error - check your connection';
-        } else if (error.message.includes('timeout')) {
-          errorMsg = 'Upload timeout - file may be too large';
-        }
-        errors.push(`${file.name}: ${errorMsg}`);
-      }
-    }
-
-    // Show results
-    document.getElementById('upload-progress').innerHTML = `
-      <div style="font-size: 2rem; margin: 20px 0;">${successCount > 0 ? '✅' : '❌'}</div>
-      <div style="font-size: 1.2rem; margin-bottom: 10px;">
-        ${successCount} successful, ${errorCount} failed
-      </div>
-    `;
-
-    let statsHtml = '';
-    if (errors.length > 0) {
-      statsHtml = `<div style="margin-top: 20px; color: #dc3545; text-align: left; max-height: 200px; overflow-y: auto;">
-        <strong>Errors:</strong><br>
-        ${errors.map(e => `• ${e}`).join('<br>')}
-      </div>`;
-    }
-    document.getElementById('upload-stats').innerHTML = statsHtml;
-
-    // Show results and start button
-    if (errorCount === 0 && successCount > 0) {
-      // Add Start Event and Presentation buttons
-      const buttonContainer = document.createElement('div');
-      buttonContainer.style.display = 'flex';
-      buttonContainer.style.gap = '10px';
-      buttonContainer.style.justifyContent = 'center';
-      buttonContainer.style.marginTop = '20px';
-      
-      const startBtn = document.createElement('button');
-      startBtn.className = 'btn btn-success';
-      startBtn.textContent = 'Start Event';
-      startBtn.onclick = async () => {
-        try {
-          const response = await fetch(`${API_BASE}/api/events/${eventId}/status`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'active' }),
-          });
-          if (response.ok) {
-            modal.remove();
-            alert('Event started! Participants can now join. Open Presentation Mode to show images on screen.');
-            state.currentView = 'admin';
-            render();
-            loadEvents();
-          } else {
-            alert('Failed to start event');
-          }
-        } catch (error) {
-          alert('Error starting event: ' + error.message);
-        }
-      };
-      buttonContainer.appendChild(startBtn);
-      
-      const presentationBtn = document.createElement('button');
-      presentationBtn.className = 'btn';
-      presentationBtn.textContent = 'Open Presentation Mode';
-      presentationBtn.style.background = '#764ba2';
-      presentationBtn.onclick = () => {
-        modal.remove();
-        renderPresentation(eventId);
-      };
-      buttonContainer.appendChild(presentationBtn);
-      
-      progressContainer.appendChild(buttonContainer);
-      
-      // Add close button
-      const closeBtn = document.createElement('button');
-      closeBtn.className = 'btn btn-secondary';
-      closeBtn.textContent = 'Close';
-      closeBtn.style.marginTop = '10px';
-      closeBtn.onclick = () => modal.remove();
-      progressContainer.appendChild(closeBtn);
-    } else {
-      // Add close button if there are errors
-      const closeBtn = document.createElement('button');
-      closeBtn.className = 'btn';
-      closeBtn.textContent = 'Close';
-      closeBtn.style.marginTop = '20px';
-      closeBtn.onclick = () => modal.remove();
-      progressContainer.appendChild(closeBtn);
-    }
-  };
-  input.click();
-}
-
-window.uploadImageForEvent = uploadImageForEvent;
-
-async function startEvent(button) {
-  const eventId = button.getAttribute('data-event-id');
-  
-  try {
-    const response = await fetch(`${API_BASE}/api/events/${eventId}/status`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'active' }),
-    });
-
-    if (response.ok) {
-      alert('Event started!');
-      state.currentView = 'admin';
-      render();
-    }
-  } catch (error) {
-    alert('Error starting event: ' + error.message);
-  }
-}
-
-function showQRCode(button) {
-  const qrCode = button.getAttribute('data-qr-code');
-  const eventName = button.getAttribute('data-event-name') || 'Event';
-  
-  // Create join URL for QR code
-  const joinUrl = `${window.location.origin}?qr=${qrCode}`;
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(joinUrl)}`;
-  
-  // Show modal with QR code
-  const modal = document.createElement('div');
-  modal.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0,0,0,0.8);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  `;
-  
-  modal.innerHTML = `
-    <div class="card" style="max-width: 500px; text-align: center;">
-      <h2>${eventName} - QR Code</h2>
-      <img src="${qrUrl}" alt="QR Code" style="margin: 20px 0; border: 4px solid #667eea; border-radius: 8px; padding: 10px; background: white;">
-      <p><strong>QR Code:</strong> <code style="background: #f0f0f0; padding: 5px 10px; border-radius: 4px;">${qrCode}</code></p>
-      <p style="margin: 10px 0; color: #666;">Share this QR code or code with participants</p>
-      <button class="btn" onclick="this.closest('div[style*=\"position: fixed\"]').remove()">Close</button>
-    </div>
-  `;
-  
-  document.body.appendChild(modal);
-}
-
-function triggerFileUpload() {
-  const input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/*';
-  input.onchange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const eventId = prompt('Enter Event ID:');
-    if (!eventId) return;
-
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('eventId', eventId);
-
-    try {
-      const response = await fetch(`${API_BASE}/api/images`, {
-        method: 'POST',
-        body: formData,
-      });
-
-      const result = await response.json();
-      alert('Image uploaded successfully!');
-    } catch (error) {
-      alert('Error uploading image: ' + error.message);
-    }
-  };
-  input.click();
-}
-
-async function submitVote() {
-  const stars = document.querySelector('.star.active')?.getAttribute('data-stars');
-  if (!stars) {
-    alert('Please select a rating by clicking on the stars');
-    return;
-  }
-
-  const currentImage = state.images[state.currentImageIndex];
-  const submitBtn = document.querySelector('.btn-success');
-  const originalText = submitBtn.textContent;
-  
-  submitBtn.disabled = true;
-  submitBtn.textContent = 'Submitting...';
-  
-  try {
-    const response = await fetch(`${API_BASE}/api/votes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        event_id: state.currentEvent.id,
-        image_id: currentImage.id,
-        stars: parseInt(stars),
-        voter_id: state.voterId,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || 'Failed to submit vote');
-    }
-
-    const result = await response.json();
-    if (result.voter_id) {
-      state.voterId = result.voter_id;
-      localStorage.setItem('voterId', result.voter_id);
-    }
-    
-    // Mark image as voted
-    if (!state.votedImages) {
-      state.votedImages = [];
-    }
-    if (!state.votedImages.includes(currentImage.id)) {
-      state.votedImages.push(currentImage.id);
-      localStorage.setItem('votedImages', JSON.stringify(state.votedImages));
-    }
-    
-    // Show success feedback
-    submitBtn.textContent = '✓ Voted!';
-    submitBtn.style.background = '#28a745';
-    
-    // Refresh event data to get updated participant count
-    try {
-      const fullEventResponse = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}?voter_id=${state.voterId || ''}`);
-      const fullEvent = await fullEventResponse.json();
-      state.currentEvent = fullEvent;
-      render();
-      setupStarRating();
-    } catch (e) {
-      console.error('Failed to refresh event data:', e);
-    }
-  } catch (error) {
-    alert('Error submitting vote: ' + error.message);
-    submitBtn.disabled = false;
-    submitBtn.textContent = originalText;
-  }
-}
-
-function nextImage() {
-  if (state.currentImageIndex < state.images.length - 1) {
-    state.currentImageIndex++;
-    render();
-    setupStarRating();
-  }
-}
-
-function previousImage() {
-  if (state.currentImageIndex > 0) {
-    state.currentImageIndex--;
-    render();
-    setupStarRating();
-  }
-}
-
-function setupStarRating() {
-  setTimeout(() => {
-    const stars = document.querySelectorAll('.star');
-    const feedback = document.getElementById('star-feedback');
-    
-    stars.forEach((star) => {
-      star.addEventListener('click', () => {
-        const rating = parseInt(star.getAttribute('data-stars'));
-        stars.forEach((s, i) => {
-          if (i < rating) {
-            s.classList.add('active');
-          } else {
-            s.classList.remove('active');
-          }
-        });
-        
-        // Show feedback
-        if (feedback) {
-          const messages = ['', 'Poor', 'Fair', 'Good', 'Very Good', 'Excellent'];
-          feedback.textContent = messages[rating] || '';
-        }
-      });
-      
-      star.addEventListener('mouseenter', () => {
-        const rating = parseInt(star.getAttribute('data-stars'));
-        stars.forEach((s, i) => {
-          if (i < rating) {
-            s.style.transform = 'scale(1.2)';
-            s.style.transition = 'transform 0.2s';
-          }
-        });
-      });
-      
-      star.addEventListener('mouseleave', () => {
-        stars.forEach((s) => {
-          s.style.transform = '';
-        });
-      });
-    });
-  }, 100);
-}
-
-function goToImage(index) {
-  if (index >= 0 && index < state.images.length) {
-    state.currentImageIndex = index;
-    render();
-    setupStarRating();
-    // Scroll to top
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-}
-
-window.goToImage = goToImage;
-
-function showCreateEvent() {
-  state.currentView = 'create-event';
-  render();
-}
-
-function showAdmin() {
-  state.currentView = 'admin';
-  render();
-  loadEvents();
-}
-
-async function loadEvents() {
-  const eventsList = document.getElementById('events-list');
-  eventsList.innerHTML = '<div class="loading">Loading events...</div>';
-  
-  // Note: In production, you'd have a GET /api/events endpoint
-  // For now, we'll show a message to create events
-  eventsList.innerHTML = `
-    <div class="card" style="background: #f8f9fa;">
-      <h3>Your Events</h3>
-      <p>Create your first event to get started! Events you create will appear here.</p>
-      <p style="margin-top: 10px; color: #666; font-size: 0.9rem;">
-        <strong>Tip:</strong> After creating an event and uploading images, click "Start Event" then "Open Presentation Mode" to show images on screen.
-      </p>
-      <p style="margin-top: 10px; color: #666; font-size: 0.9rem;">
-        Participants scan the QR code on their phones to vote. The system automatically advances when everyone votes.
-      </p>
-    </div>
-  `;
-}
-
-function showQRScanner() {
-  state.currentView = 'qr-scanner';
-  render();
-  
-  // Initialize QR scanner
-  setTimeout(() => {
-    initQRScanner();
-  }, 100);
-}
-
-function initQRScanner() {
-  const video = document.getElementById('scanner-video');
-  const canvas = document.getElementById('scanner-canvas');
-  
-  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-    .then(stream => {
-      video.srcObject = stream;
-      // In production, use a QR code scanning library like jsQR
-      // For now, we'll add a manual input option
-      addManualQRInput();
-    })
-    .catch(err => {
-      console.error('Error accessing camera:', err);
-      addManualQRInput();
-    });
-}
-
-function addManualQRInput() {
-  const scannerContainer = document.querySelector('.scanner-container');
-  scannerContainer.innerHTML += `
-    <div style="margin-top: 20px;">
-      <p>Or enter QR code manually:</p>
-      <input type="text" id="manual-qr-input" placeholder="Enter QR code" style="padding: 10px; width: 100%; max-width: 400px; margin: 10px 0;">
-      <button class="btn" onclick="joinEvent()">Join Event</button>
-    </div>
-  `;
-}
-
-async function joinEvent() {
-  const qrInput = document.getElementById('manual-qr-input');
-  let qrCode = qrInput.value.trim();
-  
-  if (!qrCode) {
-    alert('Please enter a QR code');
-    return;
-  }
-
-  // Extract QR code from URL if full URL is provided
-  if (qrCode.includes('?qr=')) {
-    const url = new URL(qrCode);
-    qrCode = url.searchParams.get('qr') || qrCode;
-  }
-
-  await joinEventByQR(qrCode);
-}
-
-// Make functions globally available
-async function showLeaderboard() {
-  if (!state.currentEvent) return;
-  
-  try {
-    const response = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}/leaderboard`);
-    if (!response.ok) {
-      throw new Error('Failed to load leaderboard');
-    }
-    
-    const data = await response.json();
-    const leaderboard = data.leaderboard || [];
-    const participantCount = data.participantCount || 0;
-    
-    state.currentView = 'leaderboard';
-    state.leaderboardData = { leaderboard, participantCount };
-    render();
-  } catch (error) {
-    alert('Error loading leaderboard: ' + error.message);
-  }
-}
-
-function renderLeaderboard() {
-  if (!state.leaderboardData) {
-    return '<div class="container"><div class="card"><div class="loading">Loading leaderboard...</div></div></div>';
-  }
-  
-  const { leaderboard, participantCount } = state.leaderboardData;
-  
-  return `
-    <div class="container">
-      <div class="header">
-        <h1>🏆 Leaderboard</h1>
-        <p style="color: white; margin-top: 10px;">${state.currentEvent.name}</p>
-      </div>
-      
-      <div class="card" style="margin-bottom: 20px; text-align: center; padding: 20px;">
-        <div style="display: flex; justify-content: space-around; flex-wrap: wrap;">
-          <div class="stat-item">
-            <div class="stat-value" style="font-size: 2rem;">👥 ${participantCount}</div>
-            <div class="stat-label">Total Participants</div>
-          </div>
-          <div class="stat-item">
-            <div class="stat-value" style="font-size: 2rem;">📸 ${leaderboard.length}</div>
-            <div class="stat-label">Images</div>
-          </div>
-        </div>
-      </div>
-      
-      <div class="card">
-        <h2 style="text-align: center; margin-bottom: 20px;">Top Rated Images</h2>
-        ${leaderboard.length === 0 ? `
-          <div style="text-align: center; padding: 40px; color: #666;">
-            <p>No votes yet. Be the first to vote!</p>
-            <button class="btn" onclick="state.currentView='voting'; render(); setupStarRating();">Start Voting</button>
-          </div>
-        ` : `
-          <div style="display: grid; gap: 20px;">
-            ${leaderboard.map((item, index) => {
-              const rank = index + 1;
-              const medal = rank === 1 ? '🥇' : rank === 2 ? '🥈' : rank === 3 ? '🥉' : `#${rank}`;
-              return `
-                <div style="display: flex; align-items: center; gap: 20px; padding: 20px; border: 2px solid ${rank <= 3 ? '#667eea' : '#e0e0e0'}; border-radius: 12px; background: ${rank <= 3 ? '#f8f9ff' : 'white'};">
-                  <div style="font-size: 2rem; font-weight: bold; min-width: 60px; text-align: center;">
-                    ${medal}
-                  </div>
-                  <img src="${item.url}" alt="${item.filename}" style="width: 150px; height: 150px; object-fit: cover; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-                  <div style="flex: 1;">
-                    <h3 style="margin: 0 0 10px 0;">${item.filename}</h3>
-                    <div style="display: flex; gap: 20px; margin-top: 10px;">
-                      <div>
-                        <div style="font-size: 1.5rem; font-weight: bold; color: #667eea;">⭐ ${parseFloat(item.avg_stars).toFixed(1)}</div>
-                        <div style="font-size: 0.9rem; color: #666;">Average Rating</div>
-                      </div>
-                      <div>
-                        <div style="font-size: 1.5rem; font-weight: bold; color: #667eea;">👥 ${item.vote_count}</div>
-                        <div style="font-size: 0.9rem; color: #666;">Total Votes</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              `;
-            }).join('')}
-          </div>
-        `}
-        
-        <div style="margin-top: 30px; text-align: center;">
-          <button class="btn" onclick="state.currentView='voting'; render(); setupStarRating();">Back to Voting</button>
-          <button class="btn btn-secondary" onclick="state.currentView='home'; render();">Home</button>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-window.previousImage = previousImage;
-window.nextImage = nextImage;
-window.submitVote = submitVote;
-window.joinEvent = joinEvent;
-window.showLeaderboard = showLeaderboard;
-
-
-
