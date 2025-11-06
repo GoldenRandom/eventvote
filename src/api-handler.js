@@ -216,7 +216,7 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
     ).bind(eventId).all();
 
     const participantCount = await env.DB.prepare(
-      `SELECT COUNT(DISTINCT voter_id) as count FROM votes WHERE event_id = ?`
+      `SELECT COUNT(*) as count FROM participants WHERE event_id = ?`
     ).bind(eventId).first();
 
     const currentImageIndex = event.current_image_index || 0;
