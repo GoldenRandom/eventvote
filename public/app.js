@@ -40,22 +40,67 @@ async function joinEventByQR(qrCode) {
     
     state.currentEvent = fullEvent;
     state.images = fullEvent.images || [];
-    state.currentImageIndex = 0;
+    state.currentImageIndex = fullEvent.currentImageIndex || 0;
     state.currentView = 'voting';
     
-    // Show welcome message with participant count
-    if (fullEvent.participantCount > 0) {
+    // Show welcome message
+    if (fullEvent.status === 'draft') {
       setTimeout(() => {
-        alert(`Welcome! ${fullEvent.participantCount} participant${fullEvent.participantCount !== 1 ? 's' : ''} ${fullEvent.participantCount === 1 ? 'has' : 'have'} joined this event.`);
+        alert('Welcome! The event will start soon. Please wait for the admin to begin.');
       }, 500);
+    } else if (fullEvent.status === 'active') {
+      if (fullEvent.participantCount > 0) {
+        setTimeout(() => {
+          alert(`Welcome! ${fullEvent.participantCount} participant${fullEvent.participantCount !== 1 ? 's' : ''} ${fullEvent.participantCount === 1 ? 'has' : 'have'} joined. Start voting!`);
+        }, 500);
+      }
     }
     
     render();
     setupStarRating();
+    
+    // Start polling for current image updates
+    if (fullEvent.status === 'active') {
+      startPollingForCurrentImage();
+    }
   } catch (error) {
     alert('Error joining event: ' + error.message);
     render();
   }
+}
+
+let pollingInterval = null;
+
+function startPollingForCurrentImage() {
+  if (pollingInterval) clearInterval(pollingInterval);
+  
+  pollingInterval = setInterval(async () => {
+    if (!state.currentEvent || state.currentView !== 'voting') {
+      clearInterval(pollingInterval);
+      return;
+    }
+    
+    try {
+      const response = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}`);
+      const eventData = await response.json();
+      
+      // Update current image if it changed
+      if (eventData.currentImageIndex !== state.currentImageIndex) {
+        state.currentImageIndex = eventData.currentImageIndex;
+        state.currentEvent = eventData;
+        render();
+        setupStarRating();
+      }
+      
+      // Check if event ended
+      if (eventData.status === 'closed') {
+        clearInterval(pollingInterval);
+        showLeaderboard();
+      }
+    } catch (error) {
+      console.error('Polling error:', error);
+    }
+  }, 2000); // Poll every 2 seconds
 }
 
 function setupEventListeners() {
@@ -120,6 +165,9 @@ function render() {
     case 'leaderboard':
       root.innerHTML = renderLeaderboard();
       break;
+    case 'presentation':
+      root.innerHTML = renderPresentationView();
+      break;
     default:
       root.innerHTML = renderHome();
   }
@@ -170,7 +218,7 @@ function renderAdmin() {
         <h1>Admin Panel</h1>
       </div>
       <div class="card">
-        <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <div style="display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap;">
           <button class="btn" data-action="create-event">Create New Event</button>
           <button class="btn btn-secondary" data-action="back">Back to Home</button>
         </div>
@@ -179,6 +227,125 @@ function renderAdmin() {
     </div>
   `;
 }
+
+function renderPresentation(eventId) {
+  state.currentView = 'presentation';
+  state.presentationEventId = eventId;
+  render();
+  startPresentationPolling(eventId);
+}
+
+function startPresentationPolling(eventId) {
+  if (state.presentationInterval) clearInterval(state.presentationInterval);
+  
+  state.presentationInterval = setInterval(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/events/${eventId}/presentation`);
+      const data = await response.json();
+      state.presentationData = data;
+      render();
+      
+      if (data.event.status === 'closed') {
+        clearInterval(state.presentationInterval);
+      }
+    } catch (error) {
+      console.error('Presentation polling error:', error);
+    }
+  }, 1000); // Poll every second for admin view
+}
+
+function renderPresentationView() {
+  if (!state.presentationData) {
+    return '<div class="container"><div class="card"><div class="loading">Loading presentation...</div></div></div>';
+  }
+  
+  const { event, currentImage, currentImageIndex, totalImages, participantCount, votesOnCurrentImage, allVoted } = state.presentationData;
+  
+  if (!currentImage) {
+    return `
+      <div class="container">
+        <div class="card" style="text-align: center; padding: 40px;">
+          <h2>No images uploaded yet</h2>
+          <p>Upload images to start the presentation</p>
+        </div>
+      </div>
+    `;
+  }
+  
+  const progress = ((currentImageIndex + 1) / totalImages * 100).toFixed(0);
+  const isLastImage = currentImageIndex >= totalImages - 1;
+  
+  return `
+    <div class="container">
+      <div class="header">
+        <h1>${event.name} - Presentation Mode</h1>
+        <span class="status-badge status-${event.status}">${event.status}</span>
+      </div>
+      
+      <div class="card" style="margin-bottom: 20px; padding: 15px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <span style="font-weight: 600;">Image ${currentImageIndex + 1} of ${totalImages}</span>
+          <span style="color: #667eea; font-weight: 600;">${progress}%</span>
+        </div>
+        <div style="background: #f0f0f0; border-radius: 10px; overflow: hidden; height: 8px;">
+          <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); height: 100%; width: ${progress}%; transition: width 0.3s;"></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.9rem; color: #666;">
+          <span>👥 ${participantCount} participant${participantCount !== 1 ? 's' : ''}</span>
+          <span style="font-weight: 600; color: ${allVoted ? '#28a745' : '#667eea'};">${votesOnCurrentImage} / ${participantCount} voted</span>
+        </div>
+      </div>
+      
+      <div class="card" style="text-align: center; padding: 20px;">
+        <img src="${currentImage.url}" alt="${currentImage.filename}" 
+             style="max-width: 100%; max-height: 70vh; object-fit: contain; border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); background: #f8f9fa; padding: 20px;">
+      </div>
+      
+      ${allVoted ? `
+      <div class="card" style="background: #28a745; color: white; text-align: center; padding: 20px; margin-bottom: 20px;">
+        <h2 style="margin: 0 0 10px 0;">✅ All participants have voted!</h2>
+        <button class="btn" onclick="advanceToNextImage('${event.id}')" style="background: white; color: #28a745; border: none; margin-top: 10px; font-size: 1.1rem; padding: 12px 24px;">
+          ${isLastImage ? 'Show Leaderboard' : 'Next Image →'}
+        </button>
+      </div>
+      ` : `
+      <div class="card" style="background: #ffc107; color: #000; text-align: center; padding: 20px; margin-bottom: 20px;">
+        <p style="margin: 0; font-weight: 600;">⏳ Waiting for all participants to vote...</p>
+        <p style="margin: 5px 0 0 0;">${votesOnCurrentImage} / ${participantCount} have voted</p>
+      </div>
+      `}
+      
+      <div class="card" style="text-align: center;">
+        <button class="btn btn-secondary" onclick="state.currentView='admin'; render(); loadEvents();">Back to Admin</button>
+      </div>
+    </div>
+  `;
+}
+
+async function advanceToNextImage(eventId) {
+  try {
+    const response = await fetch(`${API_BASE}/api/events/${eventId}/next-image`, {
+      method: 'POST',
+    });
+    
+    const data = await response.json();
+    
+    if (data.isComplete) {
+      // Show leaderboard
+      state.currentView = 'leaderboard';
+      showLeaderboard();
+    } else {
+      // Refresh presentation
+      const presResponse = await fetch(`${API_BASE}/api/events/${eventId}/presentation`);
+      state.presentationData = await presResponse.json();
+      render();
+    }
+  } catch (error) {
+    alert('Error advancing to next image: ' + error.message);
+  }
+}
+
+window.advanceToNextImage = advanceToNextImage;
 
 function renderVoting() {
   if (!state.currentEvent || state.images.length === 0) {
@@ -191,17 +358,51 @@ function renderVoting() {
     `;
   }
 
-  const currentImage = state.images[state.currentImageIndex];
+  // Show waiting screen if event not started
+  if (state.currentEvent.status === 'draft') {
+    return `
+      <div class="container">
+        <div class="card" style="text-align: center; padding: 40px;">
+          <h2>⏳ Waiting for Event to Start</h2>
+          <p style="color: #666; margin: 20px 0;">The admin will start the event soon.</p>
+          <p style="color: #666;">👥 ${state.currentEvent.participantCount || 0} participant${state.currentEvent.participantCount !== 1 ? 's' : ''} joined</p>
+        </div>
+      </div>
+    `;
+  }
+
+  // Show completed screen if event closed
+  if (state.currentEvent.status === 'closed') {
+    return `
+      <div class="container">
+        <div class="card" style="text-align: center; padding: 40px;">
+          <h2>✅ Voting Complete!</h2>
+          <p style="color: #666; margin: 20px 0;">Thank you for participating!</p>
+          <button class="btn" onclick="showLeaderboard()">View Leaderboard</button>
+        </div>
+      </div>
+    `;
+  }
+
+  const currentImage = state.currentEvent.currentImage || state.images[state.currentImageIndex];
+  if (!currentImage) {
+    return `
+      <div class="container">
+        <div class="card">
+          <div class="loading">Loading current image...</div>
+        </div>
+      </div>
+    `;
+  }
+
   const voteStats = state.currentEvent.voteStats || [];
   const stats = voteStats.find(s => s.image_id === currentImage.id) || { avg_stars: 0, vote_count: 0 };
   const progress = ((state.currentImageIndex + 1) / state.images.length * 100).toFixed(0);
   const participantCount = state.currentEvent.participantCount || 0;
+  const votesOnCurrent = state.currentEvent.votesOnCurrentImage || 0;
   
   // Check if user has voted on this image
   const hasVoted = state.votedImages && state.votedImages.includes(currentImage.id);
-  
-  // Check if user has voted on all images
-  const allVoted = state.votedImages && state.votedImages.length === state.images.length;
 
   return `
     <div class="container">
@@ -221,17 +422,20 @@ function renderVoting() {
         </div>
         <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 0.9rem; color: #666;">
           <span>👥 ${participantCount} participant${participantCount !== 1 ? 's' : ''}</span>
-          <span>${state.votedImages ? state.votedImages.length : 0} / ${state.images.length} voted</span>
+          <span>${votesOnCurrent} / ${participantCount} voted on this image</span>
         </div>
       </div>
       
-      ${allVoted ? `
-      <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; margin-bottom: 20px; text-align: center; padding: 20px;">
-        <h2 style="margin: 0 0 10px 0;">🎉 You've voted on all images!</h2>
-        <p style="margin: 0;">View the leaderboard to see the results</p>
-        <button class="btn" onclick="showLeaderboard()" style="margin-top: 15px; background: white; color: #667eea; border: none;">
-          View Leaderboard
-        </button>
+      ${state.currentEvent.allVotedOnCurrent && !hasVoted ? `
+      <div class="card" style="background: #ffc107; color: #000; margin-bottom: 20px; text-align: center; padding: 15px;">
+        <p style="margin: 0; font-weight: 600;">⏳ All participants have voted. Waiting for next image...</p>
+      </div>
+      ` : ''}
+      
+      ${hasVoted ? `
+      <div class="card" style="background: #28a745; color: white; margin-bottom: 20px; text-align: center; padding: 15px;">
+        <p style="margin: 0; font-weight: 600;">✓ You've voted! Waiting for others...</p>
+        <p style="margin: 5px 0 0 0; font-size: 0.9rem;">${votesOnCurrent} / ${participantCount} participants have voted</p>
       </div>
       ` : ''}
 
@@ -274,35 +478,18 @@ function renderVoting() {
           <div id="star-feedback" style="text-align: center; margin-top: 10px; min-height: 20px; color: #667eea; font-weight: 600;"></div>
         </div>
 
-        <!-- Navigation -->
+        <!-- Voting Button -->
         <div style="display: flex; gap: 10px; justify-content: center; margin-top: 30px; flex-wrap: wrap;">
-          <button class="btn" ${state.currentImageIndex === 0 ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} 
-                  onclick="previousImage()" style="min-width: 120px;">
-            ← Previous
+          ${!hasVoted ? `
+          <button class="btn btn-success" onclick="submitVote()" style="min-width: 200px; font-size: 1.2rem; padding: 15px 30px;">
+            Submit Vote
           </button>
-          <button class="btn btn-success" onclick="submitVote()" style="min-width: 150px; font-size: 1.1rem; padding: 12px 24px;">
-            ${hasVoted ? 'Update Vote' : 'Submit Vote'}
-          </button>
-          <button class="btn" ${state.currentImageIndex === state.images.length - 1 ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} 
-                  onclick="nextImage()" style="min-width: 120px;">
-            Next →
-          </button>
-        </div>
-
-        <!-- Image Navigation Dots -->
-        <div style="display: flex; justify-content: center; gap: 8px; margin-top: 30px; flex-wrap: wrap;">
-          ${state.images.map((img, idx) => {
-            const imgStats = voteStats.find(s => s.image_id === img.id);
-            const voted = state.votedImages && state.votedImages.includes(img.id);
-            return `
-              <button onclick="goToImage(${idx})" 
-                      style="width: 12px; height: 12px; border-radius: 50%; border: 2px solid ${idx === state.currentImageIndex ? '#667eea' : '#ddd'}; 
-                             background: ${voted ? '#28a745' : (idx === state.currentImageIndex ? '#667eea' : 'transparent')}; 
-                             cursor: pointer; transition: all 0.2s;"
-                      title="Image ${idx + 1}${voted ? ' (Voted)' : ''}">
-              </button>
-            `;
-          }).join('')}
+          ` : `
+          <div style="text-align: center; padding: 15px; background: #f8f9fa; border-radius: 8px; min-width: 200px;">
+            <div style="font-size: 1.2rem; font-weight: 600; color: #28a745;">✓ Vote Submitted</div>
+            <div style="font-size: 0.9rem; color: #666; margin-top: 5px;">Waiting for others...</div>
+          </div>
+          `}
         </div>
       </div>
     </div>
@@ -607,11 +794,16 @@ function uploadImageForEvent(eventId) {
 
     // Show results and start button
     if (errorCount === 0 && successCount > 0) {
-      // Add Start Event button
+      // Add Start Event and Presentation buttons
+      const buttonContainer = document.createElement('div');
+      buttonContainer.style.display = 'flex';
+      buttonContainer.style.gap = '10px';
+      buttonContainer.style.justifyContent = 'center';
+      buttonContainer.style.marginTop = '20px';
+      
       const startBtn = document.createElement('button');
       startBtn.className = 'btn btn-success';
       startBtn.textContent = 'Start Event';
-      startBtn.style.marginTop = '20px';
       startBtn.onclick = async () => {
         try {
           const response = await fetch(`${API_BASE}/api/events/${eventId}/status`, {
@@ -621,7 +813,7 @@ function uploadImageForEvent(eventId) {
           });
           if (response.ok) {
             modal.remove();
-            alert('Event started! Participants can now join and vote.');
+            alert('Event started! Participants can now join. Open Presentation Mode to show images on screen.');
             state.currentView = 'admin';
             render();
             loadEvents();
@@ -632,7 +824,19 @@ function uploadImageForEvent(eventId) {
           alert('Error starting event: ' + error.message);
         }
       };
-      progressContainer.appendChild(startBtn);
+      buttonContainer.appendChild(startBtn);
+      
+      const presentationBtn = document.createElement('button');
+      presentationBtn.className = 'btn';
+      presentationBtn.textContent = 'Open Presentation Mode';
+      presentationBtn.style.background = '#764ba2';
+      presentationBtn.onclick = () => {
+        modal.remove();
+        renderPresentation(eventId);
+      };
+      buttonContainer.appendChild(presentationBtn);
+      
+      progressContainer.appendChild(buttonContainer);
       
       // Add close button
       const closeBtn = document.createElement('button');
@@ -801,23 +1005,16 @@ async function submitVote() {
       console.error('Failed to refresh event data:', e);
     }
     
-    // Auto-advance after 1 second
-    setTimeout(() => {
-      if (state.currentImageIndex < state.images.length - 1) {
-        nextImage();
-      } else {
-        // Check if all images are voted
-        const allVoted = state.votedImages && state.votedImages.length === state.images.length;
-        if (allVoted) {
-          // Show leaderboard option
-          render();
-          setupStarRating();
-        } else {
-          render();
-          setupStarRating();
-        }
-      }
-    }, 1000);
+    // Refresh event data
+    try {
+      const fullEventResponse = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}`);
+      const fullEvent = await fullEventResponse.json();
+      state.currentEvent = fullEvent;
+      render();
+      setupStarRating();
+    } catch (e) {
+      console.error('Failed to refresh event data:', e);
+    }
   } catch (error) {
     alert('Error submitting vote: ' + error.message);
     submitBtn.disabled = false;
@@ -1080,5 +1277,6 @@ window.nextImage = nextImage;
 window.submitVote = submitVote;
 window.joinEvent = joinEvent;
 window.showLeaderboard = showLeaderboard;
+
 
 

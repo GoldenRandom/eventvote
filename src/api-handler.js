@@ -116,13 +116,127 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
       `SELECT COUNT(DISTINCT voter_id) as count FROM votes WHERE event_id = ?`
     ).bind(eventId).first();
 
+    // Get current image index
+    const currentImageIndex = event.current_image_index || 0;
+    const currentImage = images.results && images.results[currentImageIndex] ? images.results[currentImageIndex] : null;
+
+    // Check if all participants have voted on current image
+    let allVoted = false;
+    let votesOnCurrentImage = 0;
+    if (currentImage && participantCount?.count > 0) {
+      const votesOnImage = await env.DB.prepare(
+        `SELECT COUNT(DISTINCT voter_id) as count FROM votes WHERE event_id = ? AND image_id = ?`
+      ).bind(eventId, currentImage.id).first();
+      votesOnCurrentImage = votesOnImage?.count || 0;
+      allVoted = votesOnCurrentImage >= participantCount.count;
+    }
+
     return new Response(
       JSON.stringify({
         ...event,
         images: images.results || [],
         voteStats: voteStats.results || [],
         participantCount: participantCount?.count || 0,
+        currentImageIndex: currentImageIndex,
+        currentImage: currentImage,
+        allVotedOnCurrent: allVoted,
+        votesOnCurrentImage: votesOnCurrentImage,
       }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  // Get presentation view (admin view)
+  if (path.startsWith('/api/events/') && path.endsWith('/presentation') && method === 'GET') {
+    const eventId = path.split('/api/events/')[1].replace('/presentation', '');
+    const event = await env.DB.prepare(
+      'SELECT * FROM events WHERE id = ?'
+    ).bind(eventId).first();
+
+    if (!event) {
+      return new Response(JSON.stringify({ error: 'Event not found' }), {
+        status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const images = await env.DB.prepare(
+      'SELECT * FROM images WHERE event_id = ? ORDER BY uploaded_at ASC'
+    ).bind(eventId).all();
+
+    const participantCount = await env.DB.prepare(
+      `SELECT COUNT(DISTINCT voter_id) as count FROM votes WHERE event_id = ?`
+    ).bind(eventId).first();
+
+    const currentImageIndex = event.current_image_index || 0;
+    const currentImage = images.results && images.results[currentImageIndex] ? images.results[currentImageIndex] : null;
+
+    // Check votes on current image
+    let votesOnCurrentImage = 0;
+    let allVoted = false;
+    if (currentImage && participantCount?.count > 0) {
+      const votesOnImage = await env.DB.prepare(
+        `SELECT COUNT(DISTINCT voter_id) as count FROM votes WHERE event_id = ? AND image_id = ?`
+      ).bind(eventId, currentImage.id).first();
+      votesOnCurrentImage = votesOnImage?.count || 0;
+      allVoted = votesOnCurrentImage >= participantCount.count;
+    }
+
+    return new Response(
+      JSON.stringify({
+        event: event,
+        currentImage: currentImage,
+        currentImageIndex: currentImageIndex,
+        totalImages: images.results?.length || 0,
+        participantCount: participantCount?.count || 0,
+        votesOnCurrentImage: votesOnCurrentImage,
+        allVoted: allVoted,
+      }),
+      {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
+    );
+  }
+
+  // Advance to next image (admin action)
+  if (path.startsWith('/api/events/') && path.endsWith('/next-image') && method === 'POST') {
+    const eventId = path.split('/api/events/')[1].replace('/next-image', '');
+    
+    const event = await env.DB.prepare(
+      'SELECT * FROM events WHERE id = ?'
+    ).bind(eventId).first();
+
+    if (!event) {
+      return new Response(JSON.stringify({ error: 'Event not found' }), {
+        status: 404,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    const images = await env.DB.prepare(
+      'SELECT * FROM images WHERE event_id = ? ORDER BY uploaded_at ASC'
+    ).bind(eventId).all();
+
+    const currentIndex = event.current_image_index || 0;
+    const nextIndex = currentIndex + 1;
+    const totalImages = images.results?.length || 0;
+
+    if (nextIndex >= totalImages) {
+      // End of voting - show leaderboard
+      await env.DB.prepare(
+        'UPDATE events SET status = ? WHERE id = ?'
+      ).bind('closed', eventId).run();
+    } else {
+      // Move to next image
+      await env.DB.prepare(
+        'UPDATE events SET current_image_index = ? WHERE id = ?'
+      ).bind(nextIndex, eventId).run();
+    }
+
+    return new Response(
+      JSON.stringify({ success: true, nextIndex, isComplete: nextIndex >= totalImages }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       }

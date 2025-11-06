@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS events (
   name TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'draft', -- draft, active, closed
   created_at INTEGER NOT NULL,
-  qr_code TEXT NOT NULL UNIQUE
+  qr_code TEXT NOT NULL UNIQUE,
+  current_image_index INTEGER NOT NULL DEFAULT 0
 );
 
 -- Images table
