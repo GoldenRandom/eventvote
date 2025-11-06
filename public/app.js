@@ -27,15 +27,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function joinEventByQR(qrCode) {
   try {
-    const response = await fetch(`${API_BASE}/api/events/qr/${qrCode}`);
+    // Generate or get voter ID
+    if (!state.voterId) {
+      state.voterId = `voter_${crypto.randomUUID()}`;
+      localStorage.setItem('voterId', state.voterId);
+    }
+    
+    // Join event with voter_id
+    const response = await fetch(`${API_BASE}/api/events/qr/${qrCode}?voter_id=${state.voterId}`);
     if (!response.ok) {
       throw new Error('Event not found');
     }
 
     const event = await response.json();
     
-    // Get full event data with images
-    const fullEventResponse = await fetch(`${API_BASE}/api/events/${event.id}`);
+    // Get full event data with images (also register as participant)
+    const fullEventResponse = await fetch(`${API_BASE}/api/events/${event.id}?voter_id=${state.voterId}`);
     const fullEvent = await fullEventResponse.json();
     
     state.currentEvent = fullEvent;
@@ -46,14 +53,12 @@ async function joinEventByQR(qrCode) {
     // Show welcome message
     if (fullEvent.status === 'draft') {
       setTimeout(() => {
-        alert('Welcome! The event will start soon. Please wait for the admin to begin.');
+        alert(`Welcome! You are participant #${fullEvent.participantCount || 1}. The event will start soon.`);
       }, 500);
     } else if (fullEvent.status === 'active') {
-      if (fullEvent.participantCount > 0) {
-        setTimeout(() => {
-          alert(`Welcome! ${fullEvent.participantCount} participant${fullEvent.participantCount !== 1 ? 's' : ''} ${fullEvent.participantCount === 1 ? 'has' : 'have'} joined. Start voting!`);
-        }, 500);
-      }
+      setTimeout(() => {
+        alert(`Welcome! You are participant #${fullEvent.participantCount || 1}. Start voting!`);
+      }, 500);
     }
     
     render();
@@ -81,7 +86,7 @@ function startPollingForCurrentImage() {
     }
     
     try {
-      const response = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}`);
+      const response = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}?voter_id=${state.voterId || ''}`);
       const eventData = await response.json();
       
       // Update current image if it changed
@@ -90,6 +95,12 @@ function startPollingForCurrentImage() {
         state.currentEvent = eventData;
         render();
         setupStarRating();
+      }
+      
+      // Update participant count
+      if (eventData.participantCount !== state.currentEvent.participantCount) {
+        state.currentEvent = eventData;
+        render();
       }
       
       // Check if event ended
@@ -349,27 +360,29 @@ async function startEventFromModal(eventId, modal) {
   try {
     const response = await fetch(`${API_BASE}/api/events/${eventId}/status`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json'},
       body: JSON.stringify({ status: 'active' }),
     });
     
-    if (response.ok) {
-      if (modal) modal.remove();
-      alert('Event started! Participants can now join. Open Presentation Mode to show images on screen.');
-      
-      // Ask if they want to open presentation mode
-      if (confirm('Would you like to open Presentation Mode now?')) {
-        renderPresentation(eventId);
-      } else {
-        state.currentView = 'admin';
-        render();
-        loadEvents();
-      }
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to start event');
+    }
+    
+    if (modal) modal.remove();
+    alert('Event started! Participants can now join. Open Presentation Mode to show images on screen.');
+    
+    // Ask if they want to open presentation mode
+    if (confirm('Would you like to open Presentation Mode now?')) {
+      renderPresentation(eventId);
     } else {
-      alert('Failed to start event');
+      state.currentView = 'admin';
+      render();
+      loadEvents();
     }
   } catch (error) {
     alert('Error starting event: ' + error.message);
+    console.error('Start event error:', error);
   }
 }
 
@@ -1023,7 +1036,7 @@ async function submitVote() {
     
     // Refresh event data to get updated participant count
     try {
-      const fullEventResponse = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}`);
+      const fullEventResponse = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}?voter_id=${state.voterId || ''}`);
       const fullEvent = await fullEventResponse.json();
       state.currentEvent = fullEvent;
       render();

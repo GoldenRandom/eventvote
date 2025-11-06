@@ -33,7 +33,8 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
       }
 
       const eventId = crypto.randomUUID();
-      const qrCode = crypto.randomUUID();
+      // Generate 5-digit QR code (10000-99999)
+      const qrCode = String(Math.floor(10000 + Math.random() * 90000));
       const timestamp = Date.now();
 
       const result = await env.DB.prepare(
@@ -81,6 +82,29 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
       });
     }
 
+    // Register participant join (if voter_id provided)
+    const url = new URL(request.url);
+    const voterId = url.searchParams.get('voter_id');
+    
+    if (voterId) {
+      try {
+        // Check if already registered
+        const existing = await env.DB.prepare(
+          'SELECT * FROM participants WHERE event_id = ? AND voter_id = ?'
+        ).bind(event.id, voterId).first();
+        
+        if (!existing) {
+          const participantId = crypto.randomUUID();
+          await env.DB.prepare(
+            'INSERT INTO participants (id, event_id, voter_id, joined_at) VALUES (?, ?, ?, ?)'
+          ).bind(participantId, event.id, voterId, Date.now()).run();
+        }
+      } catch (error) {
+        // Ignore errors (participant might already exist)
+        console.error('Error registering participant:', error);
+      }
+    }
+
     return new Response(JSON.stringify(event), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -111,9 +135,9 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
        FROM votes WHERE event_id = ? GROUP BY image_id`
     ).bind(eventId).all();
 
-    // Get participant count (unique voters)
+    // Get participant count (people who joined, not just voted)
     const participantCount = await env.DB.prepare(
-      `SELECT COUNT(DISTINCT voter_id) as count FROM votes WHERE event_id = ?`
+      `SELECT COUNT(*) as count FROM participants WHERE event_id = ?`
     ).bind(eventId).first();
 
     // Get current image index
@@ -129,6 +153,31 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
       ).bind(eventId, currentImage.id).first();
       votesOnCurrentImage = votesOnImage?.count || 0;
       allVoted = votesOnCurrentImage >= participantCount.count;
+    }
+    
+    // Also register participant if voter_id provided
+    const url = new URL(request.url);
+    const voterId = url.searchParams.get('voter_id');
+    if (voterId) {
+      try {
+        const existing = await env.DB.prepare(
+          'SELECT * FROM participants WHERE event_id = ? AND voter_id = ?'
+        ).bind(eventId, voterId).first();
+        
+        if (!existing) {
+          const participantId = crypto.randomUUID();
+          await env.DB.prepare(
+            'INSERT INTO participants (id, event_id, voter_id, joined_at) VALUES (?, ?, ?, ?)'
+          ).bind(participantId, eventId, voterId, Date.now()).run();
+          // Update count
+          const newCount = await env.DB.prepare(
+            `SELECT COUNT(*) as count FROM participants WHERE event_id = ?`
+          ).bind(eventId).first();
+          participantCount.count = newCount?.count || participantCount.count;
+        }
+      } catch (error) {
+        console.error('Error registering participant:', error);
+      }
     }
 
     return new Response(
