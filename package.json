@@ -1,0 +1,25 @@
+{
+  "name": "star-voting-system",
+  "version": "1.0.0",
+  "description": "Star voting system with QR code scanning and image uploads",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler pages dev public --d1=DB=voting-db",
+    "dev:worker": "wrangler dev",
+    "deploy": "wrangler pages deploy public",
+    "deploy:worker": "wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply voting-db --remote",
+    "db:migrate:local": "wrangler d1 migrations apply voting-db --local",
+    "db:create": "wrangler d1 create voting-db",
+    "db:execute": "wrangler d1 execute voting-db --remote",
+    "db:execute:local": "wrangler d1 execute voting-db --local"
+  },
+  "dependencies": {
+    "@cloudflare/workers-types": "^4.20240208.0"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0",
+    "@types/node": "^20.0.0"
+  }
+}
+

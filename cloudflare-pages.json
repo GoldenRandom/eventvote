@@ -1,0 +1,12 @@
+{
+  "build": {
+    "command": "",
+    "cwd": ".",
+    "watch": []
+  },
+  "output_directory": "public",
+  "functions": {
+    "directory": "functions"
+  }
+}
+
