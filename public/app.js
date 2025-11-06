@@ -97,9 +97,15 @@ function startPollingForCurrentImage() {
         setupStarRating();
       }
       
-      // Update participant count
-      if (eventData.participantCount !== state.currentEvent.participantCount) {
-        state.currentEvent = eventData;
+      // Always update participant count and other data in real-time
+      const oldParticipantCount = state.currentEvent?.participantCount || 0;
+      const oldVotesOnCurrent = state.currentEvent?.votesOnCurrentImage || 0;
+      
+      state.currentEvent = eventData;
+      
+      // Render if participant count or votes changed
+      if (eventData.participantCount !== oldParticipantCount || 
+          eventData.votesOnCurrentImage !== oldVotesOnCurrent) {
         render();
       }
       
@@ -252,9 +258,23 @@ function startPresentationPolling(eventId) {
   state.presentationInterval = setInterval(async () => {
     try {
       const response = await fetch(`${API_BASE}/api/events/${eventId}/presentation`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch presentation data');
+      }
       const data = await response.json();
+      
+      // Always update to get real-time participant count
+      const oldCount = state.presentationData?.participantCount || 0;
       state.presentationData = data;
-      render();
+      
+      // Force render if participant count changed or any other data changed
+      if (data.participantCount !== oldCount || 
+          data.votesOnCurrentImage !== state.presentationData?.votesOnCurrentImage ||
+          data.currentImageIndex !== state.presentationData?.currentImageIndex) {
+        render();
+      } else {
+        render(); // Always render for real-time updates
+      }
       
       if (data.event.status === 'closed') {
         clearInterval(state.presentationInterval);
@@ -358,16 +378,24 @@ async function advanceToNextImage(eventId) {
 
 async function startEventFromModal(eventId, modal) {
   try {
+    console.log('Starting event:', eventId);
+    
     const response = await fetch(`${API_BASE}/api/events/${eventId}/status`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json'},
       body: JSON.stringify({ status: 'active' }),
     });
     
+    console.log('Response status:', response.status);
+    
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.error || 'Failed to start event');
+      console.error('Error response:', errorData);
+      throw new Error(errorData.error || errorData.details || `Failed to start event (${response.status})`);
     }
+    
+    const result = await response.json();
+    console.log('Success:', result);
     
     if (modal) modal.remove();
     alert('Event started! Participants can now join. Open Presentation Mode to show images on screen.');
@@ -381,8 +409,8 @@ async function startEventFromModal(eventId, modal) {
       loadEvents();
     }
   } catch (error) {
-    alert('Error starting event: ' + error.message);
     console.error('Start event error:', error);
+    alert('Error starting event: ' + error.message + '\n\nCheck console for details.');
   }
 }
 

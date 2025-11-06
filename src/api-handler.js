@@ -327,16 +327,52 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
 
   // Update event status
   if (path.startsWith('/api/events/') && path.endsWith('/status') && method === 'PUT') {
-    const eventId = path.split('/api/events/')[1].replace('/status', '');
-    const body = await request.json();
+    try {
+      // Extract event ID from path like /api/events/{id}/status
+      const pathParts = path.split('/');
+      const eventIdIndex = pathParts.indexOf('events') + 1;
+      const eventId = pathParts[eventIdIndex];
+      
+      if (!eventId) {
+        return new Response(JSON.stringify({ error: 'Event ID is required' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
 
-    await env.DB.prepare(
-      'UPDATE events SET status = ? WHERE id = ?'
-    ).bind(body.status, eventId).run();
+      const body = await request.json();
+      
+      if (!body.status) {
+        return new Response(JSON.stringify({ error: 'Status is required' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
 
-    return new Response(JSON.stringify({ success: true }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+      const result = await env.DB.prepare(
+        'UPDATE events SET status = ? WHERE id = ?'
+      ).bind(body.status, eventId).run();
+
+      if (!result.success) {
+        throw new Error('Database update failed');
+      }
+
+      return new Response(JSON.stringify({ success: true, eventId, status: body.status }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    } catch (error) {
+      console.error('Status update error:', error);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Failed to update event status',
+          details: error.message 
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
   }
 
   // Upload image
