@@ -265,16 +265,13 @@ function startPresentationPolling(eventId) {
       
       // Always update to get real-time participant count
       const oldCount = state.presentationData?.participantCount || 0;
+      const oldVotes = state.presentationData?.votesOnCurrentImage || 0;
+      const oldImageIndex = state.presentationData?.currentImageIndex || 0;
+      
       state.presentationData = data;
       
-      // Force render if participant count changed or any other data changed
-      if (data.participantCount !== oldCount || 
-          data.votesOnCurrentImage !== state.presentationData?.votesOnCurrentImage ||
-          data.currentImageIndex !== state.presentationData?.currentImageIndex) {
-        render();
-      } else {
-        render(); // Always render for real-time updates
-      }
+      // Always render for real-time updates (participant count, votes, image changes)
+      render();
       
       if (data.event.status === 'closed') {
         clearInterval(state.presentationInterval);
