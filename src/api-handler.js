@@ -139,45 +139,116 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
 
   // Upload image
   if (path === '/api/images' && method === 'POST') {
-    const formData = await request.formData();
-    const eventId = formData.get('eventId');
-    const file = formData.get('file');
-
-    if (!file || !eventId) {
-      return new Response(JSON.stringify({ error: 'Missing file or eventId' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // In production, you'd upload to Cloudflare R2 or similar
-    // For now, we'll store metadata and return a placeholder URL
-    const imageId = crypto.randomUUID();
-    const timestamp = Date.now();
-    const filename = file.name;
-
-    // Convert file to base64 for storage (in production, use R2)
-    const arrayBuffer = await file.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-    const dataUrl = `data:${file.type};base64,${base64}`;
-
-    await env.DB.prepare(
-      'INSERT INTO images (id, event_id, url, filename, uploaded_at) VALUES (?, ?, ?, ?, ?)'
-    )
-      .bind(imageId, eventId, dataUrl, filename, timestamp)
-      .run();
-
-    return new Response(
-      JSON.stringify({
-        id: imageId,
-        url: dataUrl,
-        filename,
-        event_id: eventId,
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    try {
+      // Check if DB binding exists
+      if (!env.DB) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'Database not configured',
+            details: 'Please configure D1 binding in Cloudflare Pages settings'
+          }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
       }
-    );
+
+      const formData = await request.formData();
+      const eventId = formData.get('eventId');
+      const file = formData.get('file');
+
+      if (!file || !eventId) {
+        return new Response(
+          JSON.stringify({ error: 'Missing file or eventId' }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      // Check file size (limit to 5MB to avoid issues)
+      const MAX_SIZE = 5 * 1024 * 1024; // 5MB
+      if (file.size > MAX_SIZE) {
+        return new Response(
+          JSON.stringify({ 
+            error: 'File too large',
+            details: `Maximum file size is 5MB. Your file is ${(file.size / 1024 / 1024).toFixed(2)}MB`
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      // Check file type
+      if (!file.type.startsWith('image/')) {
+        return new Response(
+          JSON.stringify({ error: 'Invalid file type', details: 'Only image files are allowed' }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      const imageId = crypto.randomUUID();
+      const timestamp = Date.now();
+      const filename = file.name;
+
+      // Convert file to base64 for storage
+      // Use a more efficient method for large files
+      const arrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      
+      // Convert to base64 in chunks to avoid memory issues
+      let base64 = '';
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, i + chunkSize);
+        base64 += String.fromCharCode.apply(null, chunk);
+      }
+      base64 = btoa(base64);
+      
+      const dataUrl = `data:${file.type};base64,${base64}`;
+
+      // Insert into database
+      const result = await env.DB.prepare(
+        'INSERT INTO images (id, event_id, url, filename, uploaded_at) VALUES (?, ?, ?, ?, ?)'
+      )
+        .bind(imageId, eventId, dataUrl, filename, timestamp)
+        .run();
+
+      if (!result.success) {
+        throw new Error('Database insert failed');
+      }
+
+      return new Response(
+        JSON.stringify({
+          id: imageId,
+          url: dataUrl,
+          filename,
+          event_id: eventId,
+          size: file.size,
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    } catch (error) {
+      return new Response(
+        JSON.stringify({ 
+          error: 'Failed to upload image',
+          details: error.message
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
   }
 
   // Submit vote

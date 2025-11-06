@@ -171,21 +171,35 @@ body {
 }
 
 .star {
-  font-size: 2.5rem;
+  font-size: 3rem;
   color: #ddd;
   cursor: pointer;
   transition: all 0.2s;
   user-select: none;
+  margin: 0 5px;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.1));
 }
 
-.star:hover,
+.star:hover {
+  color: #ffd700;
+  transform: scale(1.15);
+  filter: drop-shadow(0 4px 8px rgba(255,215,0,0.3));
+}
+
 .star.active {
   color: #ffd700;
   transform: scale(1.1);
+  filter: drop-shadow(0 4px 8px rgba(255,215,0,0.4));
 }
 
 .star.voted {
   color: #ffd700;
+  animation: starPulse 0.5s ease-in-out;
+}
+
+@keyframes starPulse {
+  0%, 100% { transform: scale(1.1); }
+  50% { transform: scale(1.3); }
 }
 
 .qr-code-container {
@@ -234,10 +248,20 @@ body {
 
 .voting-image {
   max-width: 100%;
-  max-height: 500px;
+  max-height: 60vh;
+  width: auto;
+  height: auto;
   border-radius: 12px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
   margin: 20px 0;
+  object-fit: contain;
+  background: #f8f9fa;
+  padding: 10px;
+  transition: transform 0.3s;
+}
+
+.voting-image:hover {
+  transform: scale(1.02);
 }
 
 .stats {

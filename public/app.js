@@ -7,6 +7,7 @@ let state = {
   images: [],
   currentImageIndex: 0,
   voterId: localStorage.getItem('voterId') || null,
+  votedImages: JSON.parse(localStorage.getItem('votedImages') || '[]'), // Track which images user has voted on
 };
 
 // Initialize app
@@ -183,6 +184,10 @@ function renderVoting() {
   const currentImage = state.images[state.currentImageIndex];
   const voteStats = state.currentEvent.voteStats || [];
   const stats = voteStats.find(s => s.image_id === currentImage.id) || { avg_stars: 0, vote_count: 0 };
+  const progress = ((state.currentImageIndex + 1) / state.images.length * 100).toFixed(0);
+  
+  // Check if user has voted on this image
+  const hasVoted = state.votedImages && state.votedImages.includes(currentImage.id);
 
   return `
     <div class="container">
@@ -190,29 +195,86 @@ function renderVoting() {
         <h1>${state.currentEvent.name}</h1>
         <span class="status-badge status-${state.currentEvent.status}">${state.currentEvent.status}</span>
       </div>
+      
+      <!-- Progress Bar -->
+      <div class="card" style="margin-bottom: 20px; padding: 15px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <span style="font-weight: 600;">Progress</span>
+          <span style="color: #667eea; font-weight: 600;">${state.currentImageIndex + 1} / ${state.images.length}</span>
+        </div>
+        <div style="background: #f0f0f0; border-radius: 10px; overflow: hidden; height: 8px;">
+          <div style="background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); height: 100%; width: ${progress}%; transition: width 0.3s;"></div>
+        </div>
+      </div>
+
       <div class="card voting-interface">
-        <div class="stats">
+        <!-- Image Stats -->
+        <div class="stats" style="margin-bottom: 20px;">
           <div class="stat-item">
-            <div class="stat-value">${state.currentImageIndex + 1}</div>
-            <div class="stat-label">of ${state.images.length}</div>
+            <div class="stat-value" style="font-size: 1.5rem;">⭐ ${stats.avg_stars ? stats.avg_stars.toFixed(1) : '0.0'}</div>
+            <div class="stat-label">Average Rating</div>
           </div>
           <div class="stat-item">
-            <div class="stat-value">${stats.avg_stars ? stats.avg_stars.toFixed(1) : '0.0'}</div>
-            <div class="stat-label">Avg Rating</div>
+            <div class="stat-value" style="font-size: 1.5rem;">👥 ${stats.vote_count || 0}</div>
+            <div class="stat-label">Total Votes</div>
           </div>
+          ${hasVoted ? `
           <div class="stat-item">
-            <div class="stat-value">${stats.vote_count || 0}</div>
-            <div class="stat-label">Votes</div>
+            <div class="stat-value" style="font-size: 1.5rem; color: #28a745;">✓</div>
+            <div class="stat-label">You Voted</div>
           </div>
+          ` : ''}
         </div>
-        <img src="${currentImage.url}" alt="${currentImage.filename}" class="voting-image">
-        <div class="star-rating" id="star-rating">
-          ${[1, 2, 3, 4, 5].map(i => `<span class="star" data-stars="${i}">⭐</span>`).join('')}
+
+        <!-- Image Display -->
+        <div style="position: relative; margin: 20px 0;">
+          <img src="${currentImage.url}" alt="${currentImage.filename}" class="voting-image" id="voting-image" 
+               style="max-width: 100%; max-height: 60vh; object-fit: contain; border-radius: 12px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2); background: #f8f9fa; padding: 10px;">
+          ${hasVoted ? `
+          <div style="position: absolute; top: 10px; right: 10px; background: #28a745; color: white; padding: 8px 16px; border-radius: 20px; font-weight: 600; font-size: 0.9rem;">
+            ✓ Voted
+          </div>
+          ` : ''}
         </div>
-        <div style="margin-top: 20px;">
-          <button class="btn" ${state.currentImageIndex === 0 ? 'disabled' : ''} onclick="previousImage()">Previous</button>
-          <button class="btn btn-success" onclick="submitVote()">Submit Vote</button>
-          <button class="btn" ${state.currentImageIndex === state.images.length - 1 ? 'disabled' : ''} onclick="nextImage()">Next</button>
+
+        <!-- Star Rating -->
+        <div style="margin: 30px 0;">
+          <div style="text-align: center; margin-bottom: 15px; font-weight: 600; color: #333;">Rate this image:</div>
+          <div class="star-rating" id="star-rating">
+            ${[1, 2, 3, 4, 5].map(i => `<span class="star" data-stars="${i}" title="${i} star${i > 1 ? 's' : ''}">⭐</span>`).join('')}
+          </div>
+          <div id="star-feedback" style="text-align: center; margin-top: 10px; min-height: 20px; color: #667eea; font-weight: 600;"></div>
+        </div>
+
+        <!-- Navigation -->
+        <div style="display: flex; gap: 10px; justify-content: center; margin-top: 30px; flex-wrap: wrap;">
+          <button class="btn" ${state.currentImageIndex === 0 ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} 
+                  onclick="previousImage()" style="min-width: 120px;">
+            ← Previous
+          </button>
+          <button class="btn btn-success" onclick="submitVote()" style="min-width: 150px; font-size: 1.1rem; padding: 12px 24px;">
+            ${hasVoted ? 'Update Vote' : 'Submit Vote'}
+          </button>
+          <button class="btn" ${state.currentImageIndex === state.images.length - 1 ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} 
+                  onclick="nextImage()" style="min-width: 120px;">
+            Next →
+          </button>
+        </div>
+
+        <!-- Image Navigation Dots -->
+        <div style="display: flex; justify-content: center; gap: 8px; margin-top: 30px; flex-wrap: wrap;">
+          ${state.images.map((img, idx) => {
+            const imgStats = voteStats.find(s => s.image_id === img.id);
+            const voted = state.votedImages && state.votedImages.includes(img.id);
+            return `
+              <button onclick="goToImage(${idx})" 
+                      style="width: 12px; height: 12px; border-radius: 50%; border: 2px solid ${idx === state.currentImageIndex ? '#667eea' : '#ddd'}; 
+                             background: ${voted ? '#28a745' : (idx === state.currentImageIndex ? '#667eea' : 'transparent')}; 
+                             cursor: pointer; transition: all 0.2s;"
+                      title="Image ${idx + 1}${voted ? ' (Voted)' : ''}">
+              </button>
+            `;
+          }).join('')}
         </div>
       </div>
     </div>
@@ -314,14 +376,69 @@ function uploadImageForEvent(eventId) {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
 
-    const uploadButton = document.createElement('div');
-    uploadButton.innerHTML = `<div class="loading">Uploading ${files.length} image(s)...</div>`;
-    document.body.appendChild(uploadButton);
+    // Filter files by size (5MB limit)
+    const validFiles = files.filter(file => {
+      if (file.size > 5 * 1024 * 1024) {
+        alert(`File "${file.name}" is too large (max 5MB). Skipping.`);
+        return false;
+      }
+      if (!file.type.startsWith('image/')) {
+        alert(`File "${file.name}" is not an image. Skipping.`);
+        return false;
+      }
+      return true;
+    });
+
+    if (validFiles.length === 0) {
+      alert('No valid images to upload.');
+      return;
+    }
+
+    // Create upload progress modal
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    `;
+    
+    const progressContainer = document.createElement('div');
+    progressContainer.className = 'card';
+    progressContainer.style.cssText = 'min-width: 400px; text-align: center;';
+    progressContainer.innerHTML = `
+      <h2>Uploading Images</h2>
+      <div id="upload-progress" style="margin: 20px 0;">
+        <div class="loading">Preparing upload...</div>
+      </div>
+      <div id="upload-stats" style="margin-top: 20px; color: #666;"></div>
+    `;
+    modal.appendChild(progressContainer);
+    document.body.appendChild(modal);
 
     let successCount = 0;
     let errorCount = 0;
+    const errors = [];
 
-    for (const file of files) {
+    // Upload files one by one with progress
+    for (let i = 0; i < validFiles.length; i++) {
+      const file = validFiles[i];
+      const progress = ((i + 1) / validFiles.length * 100).toFixed(0);
+      
+      document.getElementById('upload-progress').innerHTML = `
+        <div style="margin-bottom: 10px;">Uploading ${i + 1} of ${validFiles.length}</div>
+        <div style="background: #f0f0f0; border-radius: 10px; overflow: hidden; height: 20px;">
+          <div style="background: #667eea; height: 100%; width: ${progress}%; transition: width 0.3s;"></div>
+        </div>
+        <div style="margin-top: 10px; font-size: 0.9rem; color: #666;">${file.name}</div>
+      `;
+
       const formData = new FormData();
       formData.append('file', file);
       formData.append('eventId', eventId);
@@ -335,15 +452,50 @@ function uploadImageForEvent(eventId) {
         if (response.ok) {
           successCount++;
         } else {
+          const errorData = await response.json().catch(() => ({}));
           errorCount++;
+          errors.push(`${file.name}: ${errorData.error || 'Upload failed'}`);
         }
       } catch (error) {
         errorCount++;
+        errors.push(`${file.name}: ${error.message}`);
       }
     }
 
-    uploadButton.remove();
-    alert(`Upload complete! ${successCount} successful, ${errorCount} failed.`);
+    // Show results
+    document.getElementById('upload-progress').innerHTML = `
+      <div style="font-size: 2rem; margin: 20px 0;">${successCount > 0 ? '✅' : '❌'}</div>
+      <div style="font-size: 1.2rem; margin-bottom: 10px;">
+        ${successCount} successful, ${errorCount} failed
+      </div>
+    `;
+
+    let statsHtml = '';
+    if (errors.length > 0) {
+      statsHtml = `<div style="margin-top: 20px; color: #dc3545; text-align: left; max-height: 200px; overflow-y: auto;">
+        <strong>Errors:</strong><br>
+        ${errors.map(e => `• ${e}`).join('<br>')}
+      </div>`;
+    }
+    document.getElementById('upload-stats').innerHTML = statsHtml;
+
+    // Auto-close after 3 seconds if all successful
+    if (errorCount === 0) {
+      setTimeout(() => {
+        modal.remove();
+        if (successCount > 0) {
+          alert(`Successfully uploaded ${successCount} image(s)!`);
+        }
+      }, 2000);
+    } else {
+      // Add close button if there are errors
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'btn';
+      closeBtn.textContent = 'Close';
+      closeBtn.style.marginTop = '20px';
+      closeBtn.onclick = () => modal.remove();
+      progressContainer.appendChild(closeBtn);
+    }
   };
   input.click();
 }
@@ -439,11 +591,16 @@ function triggerFileUpload() {
 async function submitVote() {
   const stars = document.querySelector('.star.active')?.getAttribute('data-stars');
   if (!stars) {
-    alert('Please select a rating');
+    alert('Please select a rating by clicking on the stars');
     return;
   }
 
   const currentImage = state.images[state.currentImageIndex];
+  const submitBtn = document.querySelector('.btn-success');
+  const originalText = submitBtn.textContent;
+  
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Submitting...';
   
   try {
     const response = await fetch(`${API_BASE}/api/votes`, {
@@ -457,16 +614,48 @@ async function submitVote() {
       }),
     });
 
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to submit vote');
+    }
+
     const result = await response.json();
     if (result.voter_id) {
       state.voterId = result.voter_id;
       localStorage.setItem('voterId', result.voter_id);
     }
     
-    alert('Vote submitted!');
-    nextImage();
+    // Mark image as voted
+    if (!state.votedImages) {
+      state.votedImages = [];
+    }
+    if (!state.votedImages.includes(currentImage.id)) {
+      state.votedImages.push(currentImage.id);
+      localStorage.setItem('votedImages', JSON.stringify(state.votedImages));
+    }
+    
+    // Show success feedback
+    submitBtn.textContent = '✓ Voted!';
+    submitBtn.style.background = '#28a745';
+    
+    // Refresh stats
+    const fullEventResponse = await fetch(`${API_BASE}/api/events/${state.currentEvent.id}`);
+    const fullEvent = await fullEventResponse.json();
+    state.currentEvent = fullEvent;
+    
+    // Auto-advance after 1 second
+    setTimeout(() => {
+      if (state.currentImageIndex < state.images.length - 1) {
+        nextImage();
+      } else {
+        render();
+        setupStarRating();
+      }
+    }, 1000);
   } catch (error) {
     alert('Error submitting vote: ' + error.message);
+    submitBtn.disabled = false;
+    submitBtn.textContent = originalText;
   }
 }
 
@@ -489,7 +678,9 @@ function previousImage() {
 function setupStarRating() {
   setTimeout(() => {
     const stars = document.querySelectorAll('.star');
-    stars.forEach((star, index) => {
+    const feedback = document.getElementById('star-feedback');
+    
+    stars.forEach((star) => {
       star.addEventListener('click', () => {
         const rating = parseInt(star.getAttribute('data-stars'));
         stars.forEach((s, i) => {
@@ -499,10 +690,44 @@ function setupStarRating() {
             s.classList.remove('active');
           }
         });
+        
+        // Show feedback
+        if (feedback) {
+          const messages = ['', 'Poor', 'Fair', 'Good', 'Very Good', 'Excellent'];
+          feedback.textContent = messages[rating] || '';
+        }
+      });
+      
+      star.addEventListener('mouseenter', () => {
+        const rating = parseInt(star.getAttribute('data-stars'));
+        stars.forEach((s, i) => {
+          if (i < rating) {
+            s.style.transform = 'scale(1.2)';
+            s.style.transition = 'transform 0.2s';
+          }
+        });
+      });
+      
+      star.addEventListener('mouseleave', () => {
+        stars.forEach((s) => {
+          s.style.transform = '';
+        });
       });
     });
   }, 100);
 }
+
+function goToImage(index) {
+  if (index >= 0 && index < state.images.length) {
+    state.currentImageIndex = index;
+    render();
+    setupStarRating();
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+}
+
+window.goToImage = goToImage;
 
 function showCreateEvent() {
   state.currentView = 'create-event';
@@ -594,4 +819,5 @@ window.previousImage = previousImage;
 window.nextImage = nextImage;
 window.submitVote = submitVote;
 window.joinEvent = joinEvent;
+
 
