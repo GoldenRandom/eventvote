@@ -345,7 +345,36 @@ async function advanceToNextImage(eventId) {
   }
 }
 
+async function startEventFromModal(eventId, modal) {
+  try {
+    const response = await fetch(`${API_BASE}/api/events/${eventId}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'active' }),
+    });
+    
+    if (response.ok) {
+      if (modal) modal.remove();
+      alert('Event started! Participants can now join. Open Presentation Mode to show images on screen.');
+      
+      // Ask if they want to open presentation mode
+      if (confirm('Would you like to open Presentation Mode now?')) {
+        renderPresentation(eventId);
+      } else {
+        state.currentView = 'admin';
+        render();
+        loadEvents();
+      }
+    } else {
+      alert('Failed to start event');
+    }
+  } catch (error) {
+    alert('Error starting event: ' + error.message);
+  }
+}
+
 window.advanceToNextImage = advanceToNextImage;
+window.startEventFromModal = startEventFromModal;
 
 function renderVoting() {
   if (!state.currentEvent || state.images.length === 0) {
@@ -561,8 +590,9 @@ async function createEvent(button) {
         <p><strong>QR Code:</strong> <code style="background: #f0f0f0; padding: 5px 10px; border-radius: 4px;">${event.qr_code}</code></p>
         <p style="margin: 10px 0; color: #666;">Share this QR code with participants</p>
         <p style="margin: 10px 0; color: #666; font-size: 0.9rem;"><strong>Event ID:</strong> ${event.id}</p>
-        <div style="margin-top: 20px;">
+        <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
           <button class="btn" onclick="uploadImageForEvent('${event.id}')">Upload Images</button>
+          <button class="btn btn-success" onclick="startEventFromModal('${event.id}', this.closest('div[style*=\"position: fixed\"]'))">Start Event</button>
           <button class="btn btn-secondary" onclick="this.closest('div[style*=\"position: fixed\"]').remove(); state.currentView='admin'; render(); loadEvents();">Done</button>
         </div>
       </div>
