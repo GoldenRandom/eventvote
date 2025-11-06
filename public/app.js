@@ -1100,8 +1100,10 @@ async function loadEvents() {
       <h3>Your Events</h3>
       <p>Create your first event to get started! Events you create will appear here.</p>
       <p style="margin-top: 10px; color: #666; font-size: 0.9rem;">
-        <strong>Tip:</strong> After creating an event, you'll receive a QR code. 
-        Share this code with participants so they can join and vote.
+        <strong>Tip:</strong> After creating an event and uploading images, click "Start Event" then "Open Presentation Mode" to show images on screen.
+      </p>
+      <p style="margin-top: 10px; color: #666; font-size: 0.9rem;">
+        Participants scan the QR code on their phones to vote. The system automatically advances when everyone votes.
       </p>
     </div>
   `;
