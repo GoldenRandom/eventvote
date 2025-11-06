@@ -1,79 +1,54 @@
-// Shared API handler for both Workers and Pages Functions
-
 export async function handleAPI(request, env, path, method, corsHeaders) {
   const url = new URL(request.url);
 
   // Create event
   if (path === '/api/events' && method === 'POST') {
     try {
-      // Check if DB binding exists
       if (!env.DB) {
-        return new Response(
-          JSON.stringify({ 
-            error: 'Database not configured. Please configure D1 binding in Cloudflare Pages settings.',
-            details: 'Go to Settings → Functions → D1 database bindings → Add: DB → voting-db'
-          }),
-          {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
+        return new Response(JSON.stringify({ 
+          error: 'Database not configured',
+          details: 'Configure D1 binding in Cloudflare Pages settings'
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
 
       const body = await request.json();
-      
       if (!body.name || !body.name.trim()) {
-        return new Response(
-          JSON.stringify({ error: 'Event name is required' }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
+        return new Response(JSON.stringify({ error: 'Event name is required' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
 
       const eventId = crypto.randomUUID();
-      // Generate 5-digit QR code (10000-99999)
       const qrCode = String(Math.floor(10000 + Math.random() * 90000));
       const timestamp = Date.now();
 
       const result = await env.DB.prepare(
         'INSERT INTO events (id, name, status, created_at, qr_code) VALUES (?, ?, ?, ?, ?)'
-      )
-        .bind(eventId, body.name.trim(), 'draft', timestamp, qrCode)
-        .run();
+      ).bind(eventId, body.name.trim(), 'draft', timestamp, qrCode).run();
 
       if (!result.success) {
         throw new Error('Database insert failed');
       }
 
-      return new Response(
-        JSON.stringify({ id: eventId, qr_code: qrCode, name: body.name }),
-        {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+      return new Response(JSON.stringify({ id: eventId, qr_code: qrCode, name: body.name }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     } catch (error) {
-      return new Response(
-        JSON.stringify({ 
-          error: 'Failed to create event',
-          details: error.message,
-          hint: error.message.includes('DB') ? 'Database binding may not be configured. Check Cloudflare Pages settings.' : ''
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+      return new Response(JSON.stringify({ error: 'Failed to create event', details: error.message }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
   }
 
   // Get event by QR code
   if (path.startsWith('/api/events/qr/') && method === 'GET') {
     const qrCode = path.split('/api/events/qr/')[1];
-    const event = await env.DB.prepare(
-      'SELECT * FROM events WHERE qr_code = ?'
-    ).bind(qrCode).first();
+    const event = await env.DB.prepare('SELECT * FROM events WHERE qr_code = ?').bind(qrCode).first();
 
     if (!event) {
       return new Response(JSON.stringify({ error: 'Event not found' }), {
@@ -82,13 +57,9 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
       });
     }
 
-    // Register participant join (if voter_id provided)
-    const url = new URL(request.url);
     const voterId = url.searchParams.get('voter_id');
-    
     if (voterId) {
       try {
-        // Check if already registered
         const existing = await env.DB.prepare(
           'SELECT * FROM participants WHERE event_id = ? AND voter_id = ?'
         ).bind(event.id, voterId).first();
@@ -100,7 +71,6 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
           ).bind(participantId, event.id, voterId, Date.now()).run();
         }
       } catch (error) {
-        // Ignore errors (participant might already exist)
         console.error('Error registering participant:', error);
       }
     }
@@ -110,10 +80,9 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
     });
   }
 
-  // Update event status (MUST come before general GET /api/events/{id})
+  // Update event status
   if (path.startsWith('/api/events/') && path.endsWith('/status') && method === 'PUT') {
     try {
-      // Extract event ID from path like /api/events/{id}/status
       const pathParts = path.split('/');
       const eventIdIndex = pathParts.indexOf('events') + 1;
       const eventId = pathParts[eventIdIndex];
@@ -126,7 +95,6 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
       }
 
       const body = await request.json();
-      
       if (!body.status) {
         return new Response(JSON.stringify({ error: 'Status is required' }), {
           status: 400,
@@ -134,9 +102,8 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
         });
       }
 
-      const result = await env.DB.prepare(
-        'UPDATE events SET status = ? WHERE id = ?'
-      ).bind(body.status, eventId).run();
+      const result = await env.DB.prepare('UPDATE events SET status = ? WHERE id = ?')
+        .bind(body.status, eventId).run();
 
       if (!result.success) {
         throw new Error('Database update failed');
@@ -146,23 +113,16 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     } catch (error) {
-      console.error('Status update error:', error);
-      return new Response(
-        JSON.stringify({ 
-          error: 'Failed to update event status',
-          details: error.message 
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+      return new Response(JSON.stringify({ error: 'Failed to update event status', details: error.message }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
   }
 
-  // Get event by ID (must come after all specific routes)
-  if (path.startsWith('/api/events/') && method === 'GET' && !path.includes('/presentation') && !path.includes('/leaderboard') && !path.includes('/status')) {
-    // Extract event ID - remove any query params first
+  // Get event by ID
+  if (path.startsWith('/api/events/') && method === 'GET' && 
+      !path.includes('/presentation') && !path.includes('/leaderboard') && !path.includes('/status')) {
     const pathWithoutQuery = path.split('?')[0];
     const eventId = pathWithoutQuery.split('/api/events/')[1];
     
@@ -173,10 +133,7 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
       });
     }
     
-    const event = await env.DB.prepare(
-      'SELECT * FROM events WHERE id = ?'
-    ).bind(eventId).first();
-
+    const event = await env.DB.prepare('SELECT * FROM events WHERE id = ?').bind(eventId).first();
     if (!event) {
       return new Response(JSON.stringify({ error: 'Event not found' }), {
         status: 404,
@@ -184,27 +141,22 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
       });
     }
 
-    // Get images for this event
     const images = await env.DB.prepare(
       'SELECT * FROM images WHERE event_id = ? ORDER BY uploaded_at ASC'
     ).bind(eventId).all();
 
-    // Get vote statistics
     const voteStats = await env.DB.prepare(
       `SELECT image_id, AVG(stars) as avg_stars, COUNT(*) as vote_count 
        FROM votes WHERE event_id = ? GROUP BY image_id`
     ).bind(eventId).all();
 
-    // Get participant count (people who joined, not just voted)
     const participantCount = await env.DB.prepare(
       `SELECT COUNT(*) as count FROM participants WHERE event_id = ?`
     ).bind(eventId).first();
 
-    // Get current image index
     const currentImageIndex = event.current_image_index || 0;
     const currentImage = images.results && images.results[currentImageIndex] ? images.results[currentImageIndex] : null;
 
-    // Check if all participants have voted on current image
     let allVoted = false;
     let votesOnCurrentImage = 0;
     if (currentImage && participantCount?.count > 0) {
@@ -215,8 +167,6 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
       allVoted = votesOnCurrentImage >= participantCount.count;
     }
     
-    // Also register participant if voter_id provided
-    const url = new URL(request.url);
     const voterId = url.searchParams.get('voter_id');
     if (voterId) {
       try {
@@ -229,7 +179,6 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
           await env.DB.prepare(
             'INSERT INTO participants (id, event_id, voter_id, joined_at) VALUES (?, ?, ?, ?)'
           ).bind(participantId, eventId, voterId, Date.now()).run();
-          // Update count
           const newCount = await env.DB.prepare(
             `SELECT COUNT(*) as count FROM participants WHERE event_id = ?`
           ).bind(eventId).first();
@@ -240,29 +189,24 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
       }
     }
 
-    return new Response(
-      JSON.stringify({
-        ...event,
-        images: images.results || [],
-        voteStats: voteStats.results || [],
-        participantCount: participantCount?.count || 0,
-        currentImageIndex: currentImageIndex,
-        currentImage: currentImage,
-        allVotedOnCurrent: allVoted,
-        votesOnCurrentImage: votesOnCurrentImage,
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
+    return new Response(JSON.stringify({
+      ...event,
+      images: images.results || [],
+      voteStats: voteStats.results || [],
+      participantCount: participantCount?.count || 0,
+      currentImageIndex: currentImageIndex,
+      currentImage: currentImage,
+      allVotedOnCurrent: allVoted,
+      votesOnCurrentImage: votesOnCurrentImage,
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
-  // Get presentation view (admin view)
+  // Get presentation view
   if (path.startsWith('/api/events/') && path.endsWith('/presentation') && method === 'GET') {
     const eventId = path.split('/api/events/')[1].replace('/presentation', '');
-    const event = await env.DB.prepare(
-      'SELECT * FROM events WHERE id = ?'
-    ).bind(eventId).first();
+    const event = await env.DB.prepare('SELECT * FROM events WHERE id = ?').bind(eventId).first();
 
     if (!event) {
       return new Response(JSON.stringify({ error: 'Event not found' }), {
@@ -282,7 +226,6 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
     const currentImageIndex = event.current_image_index || 0;
     const currentImage = images.results && images.results[currentImageIndex] ? images.results[currentImageIndex] : null;
 
-    // Check votes on current image
     let votesOnCurrentImage = 0;
     let allVoted = false;
     if (currentImage && participantCount?.count > 0) {
@@ -293,29 +236,23 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
       allVoted = votesOnCurrentImage >= participantCount.count;
     }
 
-    return new Response(
-      JSON.stringify({
-        event: event,
-        currentImage: currentImage,
-        currentImageIndex: currentImageIndex,
-        totalImages: images.results?.length || 0,
-        participantCount: participantCount?.count || 0,
-        votesOnCurrentImage: votesOnCurrentImage,
-        allVoted: allVoted,
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
+    return new Response(JSON.stringify({
+      event: event,
+      currentImage: currentImage,
+      currentImageIndex: currentImageIndex,
+      totalImages: images.results?.length || 0,
+      participantCount: participantCount?.count || 0,
+      votesOnCurrentImage: votesOnCurrentImage,
+      allVoted: allVoted,
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
-  // Advance to next image (admin action)
+  // Advance to next image
   if (path.startsWith('/api/events/') && path.endsWith('/next-image') && method === 'POST') {
     const eventId = path.split('/api/events/')[1].replace('/next-image', '');
-    
-    const event = await env.DB.prepare(
-      'SELECT * FROM events WHERE id = ?'
-    ).bind(eventId).first();
+    const event = await env.DB.prepare('SELECT * FROM events WHERE id = ?').bind(eventId).first();
 
     if (!event) {
       return new Response(JSON.stringify({ error: 'Event not found' }), {
@@ -333,30 +270,20 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
     const totalImages = images.results?.length || 0;
 
     if (nextIndex >= totalImages) {
-      // End of voting - show leaderboard
-      await env.DB.prepare(
-        'UPDATE events SET status = ? WHERE id = ?'
-      ).bind('closed', eventId).run();
+      await env.DB.prepare('UPDATE events SET status = ? WHERE id = ?').bind('closed', eventId).run();
     } else {
-      // Move to next image
-      await env.DB.prepare(
-        'UPDATE events SET current_image_index = ? WHERE id = ?'
-      ).bind(nextIndex, eventId).run();
+      await env.DB.prepare('UPDATE events SET current_image_index = ? WHERE id = ?').bind(nextIndex, eventId).run();
     }
 
-    return new Response(
-      JSON.stringify({ success: true, nextIndex, isComplete: nextIndex >= totalImages }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
+    return new Response(JSON.stringify({ success: true, nextIndex, isComplete: nextIndex >= totalImages }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
-  // Get leaderboard for event
+  // Get leaderboard
   if (path.startsWith('/api/events/') && path.endsWith('/leaderboard') && method === 'GET') {
     const eventId = path.split('/api/events/')[1].replace('/leaderboard', '');
 
-    // Get all images with their stats, ordered by average rating
     const leaderboard = await env.DB.prepare(
       `SELECT 
         i.id, i.url, i.filename, i.uploaded_at,
@@ -369,38 +296,26 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
        ORDER BY avg_stars DESC, vote_count DESC`
     ).bind(eventId).all();
 
-    // Get participant count
     const participantCount = await env.DB.prepare(
       `SELECT COUNT(*) as count FROM participants WHERE event_id = ?`
     ).bind(eventId).first();
 
-    return new Response(
-      JSON.stringify({
-        leaderboard: leaderboard.results || [],
-        participantCount: participantCount?.count || 0,
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
+    return new Response(JSON.stringify({
+      leaderboard: leaderboard.results || [],
+      participantCount: participantCount?.count || 0,
+    }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
-
 
   // Upload image
   if (path === '/api/images' && method === 'POST') {
     try {
-      // Check if DB binding exists
       if (!env.DB) {
-        return new Response(
-          JSON.stringify({ 
-            error: 'Database not configured',
-            details: 'Please configure D1 binding in Cloudflare Pages settings'
-          }),
-          {
-            status: 500,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
+        return new Response(JSON.stringify({ error: 'Database not configured' }), {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
 
       const formData = await request.formData();
@@ -408,185 +323,127 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
       const file = formData.get('file');
 
       if (!file || !eventId) {
-        return new Response(
-          JSON.stringify({ error: 'Missing file or eventId' }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
+        return new Response(JSON.stringify({ error: 'File and eventId are required' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
 
-      // Check file size (limit to 100MB)
-      const MAX_SIZE = 100 * 1024 * 1024; // 100MB
+      const MAX_SIZE = 100 * 1024 * 1024;
       if (file.size > MAX_SIZE) {
-        return new Response(
-          JSON.stringify({ 
-            error: 'File too large',
-            details: `Maximum file size is 100MB. Your file is ${(file.size / 1024 / 1024).toFixed(2)}MB`
-          }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
+        return new Response(JSON.stringify({
+          error: 'File too large',
+          details: `Maximum file size is 100MB. Your file is ${(file.size / 1024 / 1024).toFixed(2)}MB`
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
 
-      // Check file type
       if (!file.type.startsWith('image/')) {
-        return new Response(
-          JSON.stringify({ error: 'Invalid file type', details: 'Only image files are allowed' }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          }
-        );
+        return new Response(JSON.stringify({ error: 'File must be an image' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
 
       const imageId = crypto.randomUUID();
       const timestamp = Date.now();
       const filename = file.name;
 
-      // Convert file to base64 for storage
-      // Use a more efficient method for large files
-      let arrayBuffer;
-      try {
-        arrayBuffer = await file.arrayBuffer();
-      } catch (error) {
-        throw new Error(`Failed to read file: ${error.message}`);
-      }
-
+      const arrayBuffer = await file.arrayBuffer();
       const bytes = new Uint8Array(arrayBuffer);
-      
-      // Convert to base64 in chunks to avoid memory issues
       let base64 = '';
       const chunkSize = 8192;
-      try {
-        for (let i = 0; i < bytes.length; i += chunkSize) {
-          const chunk = bytes.subarray(i, i + chunkSize);
-          base64 += String.fromCharCode.apply(null, chunk);
-        }
-        base64 = btoa(base64);
-      } catch (error) {
-        throw new Error(`Failed to encode image: ${error.message}. File may be corrupted.`);
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        const chunk = bytes.subarray(i, i + chunkSize);
+        base64 += String.fromCharCode.apply(null, chunk);
       }
-      
-      // Check if base64 string is too large (D1 has limits - max ~5MB base64 = ~3.75MB original)
-      // Be conservative to avoid SQLITE_TOOBIG errors
-      if (base64.length > 5 * 1024 * 1024) { // ~5MB base64 string (safe limit for D1)
-        throw new Error(`Image is too large after encoding (${(base64.length / 1024 / 1024).toFixed(2)}MB). Maximum safe size is ~3.75MB. The image will be automatically compressed on upload.`);
+      base64 = btoa(base64);
+
+      if (base64.length > 5 * 1024 * 1024) {
+        return new Response(JSON.stringify({
+          error: 'Image too large after encoding',
+          details: 'Maximum safe size is ~3.75MB. The image will be automatically compressed on upload.'
+        }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
-      
+
       const dataUrl = `data:${file.type};base64,${base64}`;
 
-      // Insert into database
-      let result;
-      try {
-        result = await env.DB.prepare(
-          'INSERT INTO images (id, event_id, url, filename, uploaded_at) VALUES (?, ?, ?, ?, ?)'
-        )
-          .bind(imageId, eventId, dataUrl, filename, timestamp)
-          .run();
-      } catch (error) {
-        throw new Error(`Database error: ${error.message}`);
-      }
+      const result = await env.DB.prepare(
+        'INSERT INTO images (id, event_id, url, filename, uploaded_at) VALUES (?, ?, ?, ?, ?)'
+      ).bind(imageId, eventId, dataUrl, filename, timestamp).run();
 
       if (!result.success) {
-        throw new Error(`Database insert failed: ${result.error || 'Unknown error'}`);
+        throw new Error('Database insert failed');
       }
 
-      return new Response(
-        JSON.stringify({
-          id: imageId,
-          url: dataUrl,
-          filename,
-          event_id: eventId,
-          size: file.size,
-        }),
-        {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+      return new Response(JSON.stringify({
+        id: imageId,
+        url: dataUrl,
+        filename,
+        event_id: eventId,
+        size: file.size,
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     } catch (error) {
-      console.error('Image upload error:', error);
-      return new Response(
-        JSON.stringify({ 
-          error: 'Failed to upload image',
-          details: error.message || 'Unknown error occurred'
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+      return new Response(JSON.stringify({
+        error: 'Failed to upload image',
+        details: error.message
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
   }
 
   // Submit vote
   if (path === '/api/votes' && method === 'POST') {
-    const body = await request.json();
-    const voteId = crypto.randomUUID();
-    const timestamp = Date.now();
-
-    // Generate or use provided voter_id
-    const voterId = body.voter_id || `voter_${crypto.randomUUID()}`;
-
-    // Check if vote already exists
-    const existing = await env.DB.prepare(
-      'SELECT * FROM votes WHERE event_id = ? AND image_id = ? AND voter_id = ?'
-    )
-      .bind(body.event_id, body.image_id, voterId)
-      .first();
-
-    if (existing) {
-      // Update existing vote
-      await env.DB.prepare(
-        'UPDATE votes SET stars = ?, created_at = ? WHERE id = ?'
-      ).bind(body.stars, timestamp, existing.id).run();
-
-      return new Response(
-        JSON.stringify({ id: existing.id, updated: true }),
-        {
+    try {
+      if (!env.DB) {
+        return new Response(JSON.stringify({ error: 'Database not configured' }), {
+          status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
+        });
+      }
+
+      const body = await request.json();
+      const { eventId, imageId, voterId, stars } = body;
+
+      if (!eventId || !imageId || !voterId || !stars || stars < 1 || stars > 5) {
+        return new Response(JSON.stringify({ error: 'Invalid vote data' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const voteId = crypto.randomUUID();
+      const timestamp = Date.now();
+
+      const result = await env.DB.prepare(
+        'INSERT INTO votes (id, event_id, image_id, voter_id, stars, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+      ).bind(voteId, eventId, imageId, voterId, stars, timestamp).run();
+
+      if (!result.success) {
+        throw new Error('Database insert failed');
+      }
+
+      return new Response(JSON.stringify({ success: true, id: voteId }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    } catch (error) {
+      return new Response(JSON.stringify({
+        error: 'Failed to submit vote',
+        details: error.message
+      }), {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
-
-    // Create new vote
-    await env.DB.prepare(
-      'INSERT INTO votes (id, event_id, image_id, voter_id, stars, created_at) VALUES (?, ?, ?, ?, ?, ?)'
-    )
-      .bind(voteId, body.event_id, body.image_id, voterId, body.stars, timestamp)
-      .run();
-
-    return new Response(
-      JSON.stringify({ id: voteId, voter_id: voterId }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
-  }
-
-  // Get votes for an image
-  if (path.startsWith('/api/images/') && path.endsWith('/votes') && method === 'GET') {
-    const imageId = path.split('/api/images/')[1].replace('/votes', '');
-    const votes = await env.DB.prepare(
-      'SELECT * FROM votes WHERE image_id = ? ORDER BY created_at DESC'
-    ).bind(imageId).all();
-
-    const stats = await env.DB.prepare(
-      'SELECT AVG(stars) as avg_stars, COUNT(*) as vote_count FROM votes WHERE image_id = ?'
-    ).bind(imageId).first();
-
-    return new Response(
-      JSON.stringify({
-        votes: votes.results || [],
-        stats: stats || { avg_stars: 0, vote_count: 0 },
-      }),
-      {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
   }
 
   return new Response(JSON.stringify({ error: 'Not found' }), {

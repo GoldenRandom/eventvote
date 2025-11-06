@@ -1,6 +1,5 @@
 const API_BASE = window.location.origin;
 
-// State management
 let state = {
   currentView: 'home',
   currentEvent: null,
@@ -10,7 +9,6 @@ let state = {
   votedImages: JSON.parse(localStorage.getItem('votedImages') || '[]'),
 };
 
-// Initialize app
 document.addEventListener('DOMContentLoaded', () => {
   const urlParams = new URLSearchParams(window.location.search);
   const code = urlParams.get('code');
@@ -24,7 +22,6 @@ document.addEventListener('DOMContentLoaded', () => {
   setupEventListeners();
 });
 
-// Generate or get voter ID
 function getVoterId() {
   if (!state.voterId) {
     state.voterId = `voter_${crypto.randomUUID()}`;
@@ -37,9 +34,7 @@ async function joinEventByCode(code) {
   try {
     const voterId = getVoterId();
     const response = await fetch(`${API_BASE}/api/events/qr/${code}?voter_id=${voterId}`);
-    if (!response.ok) {
-      throw new Error('Event not found');
-    }
+    if (!response.ok) throw new Error('Event not found');
 
     const event = await response.json();
     const fullEventResponse = await fetch(`${API_BASE}/api/events/${event.id}?voter_id=${voterId}`);
@@ -106,6 +101,11 @@ function setupEventListeners() {
       handleAction(action);
     }
   });
+  
+  document.getElementById('event-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    createEvent();
+  });
 }
 
 function handleAction(action) {
@@ -121,9 +121,6 @@ function handleAction(action) {
     case 'back':
       state.currentView = 'home';
       render();
-      break;
-    case 'submit-event':
-      createEvent();
       break;
   }
 }
@@ -166,7 +163,7 @@ function renderHome() {
       </div>
       <div class="card">
         <h2>Get Started</h2>
-        <div style="display: flex; gap: 20px; margin-top: 20px; flex-wrap: wrap;">
+        <div style="display: flex; gap: 20px; margin-top: 20px;">
           <button class="btn" data-action="admin">Admin Panel</button>
         </div>
       </div>
@@ -200,7 +197,7 @@ function renderCreateEvent() {
             <label for="event-name">Event Name</label>
             <input type="text" id="event-name" required placeholder="Enter event name">
           </div>
-          <button type="submit" class="btn" data-action="submit-event">Create Event</button>
+          <button type="submit" class="btn">Create Event</button>
           <button type="button" class="btn btn-secondary" data-action="back">Cancel</button>
         </form>
       </div>
@@ -250,12 +247,12 @@ function renderShowCode() {
       <div class="card" style="text-align: center;">
         <h2 style="margin-bottom: 20px;">Join Code</h2>
         <div class="code-display" id="join-code">${state.currentEvent.qr_code}</div>
-        <p style="margin-top: 20px; color: #666;">Share this code with participants</p>
-        <p style="margin: 10px 0; color: #666; font-size: 0.9rem;">Participants join at: <code>${window.location.origin}?code=${state.currentEvent.qr_code}</code></p>
+        <p style="margin-top: 20px; color: #666; font-size: 1.1rem;">Share this code with participants</p>
+        <p style="margin: 10px 0; color: #666;">Participants join at: <code style="background: #f0f0f0; padding: 5px 10px; border-radius: 4px;">${window.location.origin}?code=${state.currentEvent.qr_code}</code></p>
         
         <div style="margin-top: 40px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
-          <div style="font-size: 1.5rem; font-weight: 600; color: #667eea;" id="participant-count">0</div>
-          <div style="color: #666; margin-top: 10px;">Participants Joined</div>
+          <div style="font-size: 2rem; font-weight: 600; color: #667eea;" id="participant-count">0</div>
+          <div style="color: #666; margin-top: 10px; font-size: 1.1rem;">Participants Joined</div>
         </div>
         
         <div style="margin-top: 30px;">
@@ -310,11 +307,7 @@ async function startVoting() {
       throw new Error('Failed to start voting');
     }
     
-    if (confirm('Voting started! Open Presentation Mode to show images on screen?')) {
-      renderPresentation(state.currentEvent.id);
-    } else {
-      renderPresentation(state.currentEvent.id);
-    }
+    renderPresentation(state.currentEvent.id);
   } catch (error) {
     alert('Error starting vote: ' + error.message);
   }
@@ -819,3 +812,4 @@ function compressImage(file, maxWidth = 1920, maxHeight = 1920, quality = 0.85, 
     reader.readAsDataURL(file);
   });
 }
+

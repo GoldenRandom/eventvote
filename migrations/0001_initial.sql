@@ -1,11 +1,11 @@
--- Enable foreign key constraints (required for D1)
+-- Enable foreign key constraints
 PRAGMA foreign_keys = ON;
 
 -- Events table
 CREATE TABLE IF NOT EXISTS events (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'draft', -- draft, active, closed
+  status TEXT NOT NULL DEFAULT 'draft',
   created_at INTEGER NOT NULL,
   qr_code TEXT NOT NULL UNIQUE,
   current_image_index INTEGER NOT NULL DEFAULT 0
@@ -21,6 +21,16 @@ CREATE TABLE IF NOT EXISTS images (
   FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
 );
 
+-- Participants table
+CREATE TABLE IF NOT EXISTS participants (
+  id TEXT PRIMARY KEY,
+  event_id TEXT NOT NULL,
+  voter_id TEXT NOT NULL,
+  joined_at INTEGER NOT NULL,
+  FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+  UNIQUE(event_id, voter_id)
+);
+
 -- Votes table
 CREATE TABLE IF NOT EXISTS votes (
   id TEXT PRIMARY KEY,
@@ -34,9 +44,9 @@ CREATE TABLE IF NOT EXISTS votes (
   UNIQUE(event_id, image_id, voter_id)
 );
 
--- Indexes for better performance
+-- Indexes
 CREATE INDEX IF NOT EXISTS idx_images_event_id ON images(event_id);
+CREATE INDEX IF NOT EXISTS idx_participants_event_id ON participants(event_id);
 CREATE INDEX IF NOT EXISTS idx_votes_event_id ON votes(event_id);
 CREATE INDEX IF NOT EXISTS idx_votes_image_id ON votes(image_id);
-CREATE INDEX IF NOT EXISTS idx_votes_voter_id ON votes(voter_id);
 

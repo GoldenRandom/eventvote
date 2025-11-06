@@ -1,14 +1,8 @@
 name = "star-voting-system"
-main = "src/index.js"
 compatibility_date = "2024-01-01"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "voting-db"
 database_id = "314f21a4-8b79-49f3-99dd-2d6cf6b23b44"
-
-# For Cloudflare Pages deployment, static files are served automatically
-# Remove [site] section if deploying to Pages instead of Workers
-# [site]
-# bucket = "./public"
 
