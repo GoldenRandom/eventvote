@@ -168,13 +168,13 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
         );
       }
 
-      // Check file size (limit to 5MB to avoid issues)
-      const MAX_SIZE = 5 * 1024 * 1024; // 5MB
+      // Check file size (limit to 100MB)
+      const MAX_SIZE = 100 * 1024 * 1024; // 100MB
       if (file.size > MAX_SIZE) {
         return new Response(
           JSON.stringify({ 
             error: 'File too large',
-            details: `Maximum file size is 5MB. Your file is ${(file.size / 1024 / 1024).toFixed(2)}MB`
+            details: `Maximum file size is 100MB. Your file is ${(file.size / 1024 / 1024).toFixed(2)}MB`
           }),
           {
             status: 400,

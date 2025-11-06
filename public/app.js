@@ -376,10 +376,10 @@ function uploadImageForEvent(eventId) {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
 
-    // Filter files by size (5MB limit)
+    // Filter files by size (100MB limit)
     const validFiles = files.filter(file => {
-      if (file.size > 5 * 1024 * 1024) {
-        alert(`File "${file.name}" is too large (max 5MB). Skipping.`);
+      if (file.size > 100 * 1024 * 1024) {
+        alert(`File "${file.name}" is too large (max 100MB). Skipping.`);
         return false;
       }
       if (!file.type.startsWith('image/')) {
