@@ -110,9 +110,69 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
     });
   }
 
-  // Get event by ID
-  if (path.startsWith('/api/events/') && method === 'GET') {
-    const eventId = path.split('/api/events/')[1];
+  // Update event status (MUST come before general GET /api/events/{id})
+  if (path.startsWith('/api/events/') && path.endsWith('/status') && method === 'PUT') {
+    try {
+      // Extract event ID from path like /api/events/{id}/status
+      const pathParts = path.split('/');
+      const eventIdIndex = pathParts.indexOf('events') + 1;
+      const eventId = pathParts[eventIdIndex];
+      
+      if (!eventId) {
+        return new Response(JSON.stringify({ error: 'Event ID is required' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const body = await request.json();
+      
+      if (!body.status) {
+        return new Response(JSON.stringify({ error: 'Status is required' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const result = await env.DB.prepare(
+        'UPDATE events SET status = ? WHERE id = ?'
+      ).bind(body.status, eventId).run();
+
+      if (!result.success) {
+        throw new Error('Database update failed');
+      }
+
+      return new Response(JSON.stringify({ success: true, eventId, status: body.status }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    } catch (error) {
+      console.error('Status update error:', error);
+      return new Response(
+        JSON.stringify({ 
+          error: 'Failed to update event status',
+          details: error.message 
+        }),
+        {
+          status: 500,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        }
+      );
+    }
+  }
+
+  // Get event by ID (must come after all specific routes)
+  if (path.startsWith('/api/events/') && method === 'GET' && !path.includes('/presentation') && !path.includes('/leaderboard') && !path.includes('/status')) {
+    // Extract event ID - remove any query params first
+    const pathWithoutQuery = path.split('?')[0];
+    const eventId = pathWithoutQuery.split('/api/events/')[1];
+    
+    if (!eventId) {
+      return new Response(JSON.stringify({ error: 'Event ID is required' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    
     const event = await env.DB.prepare(
       'SELECT * FROM events WHERE id = ?'
     ).bind(eventId).first();
@@ -325,55 +385,6 @@ export async function handleAPI(request, env, path, method, corsHeaders) {
     );
   }
 
-  // Update event status
-  if (path.startsWith('/api/events/') && path.endsWith('/status') && method === 'PUT') {
-    try {
-      // Extract event ID from path like /api/events/{id}/status
-      const pathParts = path.split('/');
-      const eventIdIndex = pathParts.indexOf('events') + 1;
-      const eventId = pathParts[eventIdIndex];
-      
-      if (!eventId) {
-        return new Response(JSON.stringify({ error: 'Event ID is required' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      const body = await request.json();
-      
-      if (!body.status) {
-        return new Response(JSON.stringify({ error: 'Status is required' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      const result = await env.DB.prepare(
-        'UPDATE events SET status = ? WHERE id = ?'
-      ).bind(body.status, eventId).run();
-
-      if (!result.success) {
-        throw new Error('Database update failed');
-      }
-
-      return new Response(JSON.stringify({ success: true, eventId, status: body.status }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    } catch (error) {
-      console.error('Status update error:', error);
-      return new Response(
-        JSON.stringify({ 
-          error: 'Failed to update event status',
-          details: error.message 
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-  }
 
   // Upload image
   if (path === '/api/images' && method === 'POST') {
