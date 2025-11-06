@@ -372,6 +372,8 @@ function renderPresentation(eventId) {
 function startPresentationPolling(eventId) {
   if (state.presentationInterval) clearInterval(state.presentationInterval);
   
+  let lastAllVotedState = false;
+  
   state.presentationInterval = setInterval(async () => {
     try {
       const response = await fetch(`${API_BASE}/api/events/${eventId}/presentation`);
@@ -381,8 +383,21 @@ function startPresentationPolling(eventId) {
       state.presentationData = data;
       render();
       
+      // Auto-advance when all participants have voted
+      if (data.allVoted && !lastAllVotedState && data.participantCount > 0) {
+        lastAllVotedState = true;
+        // Small delay to show the "all voted" message, then auto-advance
+        setTimeout(async () => {
+          await advanceToNextImage(eventId);
+          lastAllVotedState = false; // Reset for next image
+        }, 2000); // 2 second delay to show confirmation
+      } else if (!data.allVoted) {
+        lastAllVotedState = false; // Reset if not all voted yet
+      }
+      
       if (data.event.status === 'closed') {
         clearInterval(state.presentationInterval);
+        showLeaderboard();
       }
     } catch (error) {
       console.error('Presentation polling error:', error);
@@ -438,9 +453,7 @@ function renderPresentationView() {
       ${allVoted ? `
       <div class="card" style="background: #28a745; color: white; text-align: center; padding: 20px; margin-bottom: 20px;">
         <h2 style="margin: 0 0 10px 0;">✅ All participants have voted!</h2>
-        <button class="btn" onclick="advanceToNextImage('${event.id}')" style="background: white; color: #28a745; border: none; margin-top: 10px; font-size: 1.1rem; padding: 12px 24px;">
-          ${isLastImage ? 'Show Leaderboard' : 'Next Image →'}
-        </button>
+        <p style="margin: 5px 0; font-size: 0.9rem; opacity: 0.9;">Advancing to ${isLastImage ? 'leaderboard' : 'next image'}...</p>
       </div>
       ` : `
       <div class="card" style="background: #ffc107; color: #000; text-align: center; padding: 20px; margin-bottom: 20px;">
