@@ -102,9 +102,12 @@ function setupEventListeners() {
     }
   });
   
-  document.getElementById('event-form')?.addEventListener('submit', (e) => {
-    e.preventDefault();
-    createEvent();
+  // Use event delegation for form submission
+  document.addEventListener('submit', (e) => {
+    if (e.target.id === 'event-form') {
+      e.preventDefault();
+      createEvent();
+    }
   });
 }
 
@@ -227,11 +230,24 @@ async function createEvent() {
     }
     
     const event = await response.json();
+    console.log('Event created:', event);
+    
+    // Set state before rendering
     state.currentEvent = event;
     state.currentView = 'show-code';
+    
+    // Render the show-code view
     render();
-    uploadImagesForEvent(event.id);
+    
+    // Start polling for participants
+    startParticipantPolling();
+    
+    // Upload images after a short delay to ensure render is complete
+    setTimeout(() => {
+      uploadImagesForEvent(event.id);
+    }, 100);
   } catch (error) {
+    console.error('Error creating event:', error);
     alert('Error creating event: ' + error.message);
   }
 }
